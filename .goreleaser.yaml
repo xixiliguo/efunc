@@ -1,0 +1,32 @@
+project_name: efunc
+
+release:
+  github:
+    owner: xixiliguo
+    name: efunc
+  name_template: "{{.Tag}}"
+
+changelog:
+  skip: true
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}} -X main.builtBy=goreleaser
+
+archives:
+  - replacements:
+      amd64: x86_64
+      arm64: aarch64
+
+checksum:
+  name_template: "SHA256SUMS"
+  algorithm: sha256
+
+snapshot:
+  name_template: "{{ incpatch .Version }}_{{ .ShortCommit}}"
