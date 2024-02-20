@@ -104,8 +104,6 @@ type FuncGraph struct {
 	allow_comm_cnt  uint32
 	deny_comm_cnt   uint32
 	comms           map[[16]uint8]bool
-	btfSpec         *btf.Spec
-	specs           map[string]*btf.Spec
 	ksyms           KSymCache
 	haveKprobeMulti bool
 	haveGetFuncIP   bool
@@ -130,7 +128,6 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 		idToFuncs:      map[btf.TypeID]FuncInfo{},
 		pids:           map[uint32]bool{},
 		comms:          map[[16]uint8]bool{},
-		specs:          make(map[string]*btf.Spec),
 		taskToEvents:   map[uint64][]FuncEvent{},
 		s:              &strings.Builder{},
 	}
@@ -150,7 +147,7 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 
 func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool) (FuncInfo, bool) {
 	for _, expr := range exprs {
-		if sym.Module == "" && sym.Name == expr.Name {
+		if sym.Module == expr.Module && sym.Name == expr.Name {
 			id, info := fg.findBTFInfo(sym)
 			fn := FuncInfo{
 				isEntry: isEntry,
@@ -217,25 +214,9 @@ func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (
 
 func (fg *FuncGraph) findBTFInfo(sym Symbol) (btf.TypeID, *btf.Func) {
 
-	spec := fg.btfSpec
-
-	if sym.Module != "" {
-		if splitSpec, ok := fg.specs[sym.Module]; ok {
-			spec = splitSpec
-		} else {
-			h, err := btf.FindHandle(func(info *btf.HandleInfo) bool {
-				return info.Name == sym.Module
-			})
-			if err != nil {
-				return 0, nil
-			}
-			splitSpec, err := h.Spec(spec)
-			if err != nil {
-				return 0, nil
-			}
-			fg.specs[sym.Module] = splitSpec
-			spec = splitSpec
-		}
+	spec, err := loadbtfSpec(sym.Module)
+	if err != nil {
+		return 0, nil
 	}
 
 	info := &btf.Func{}
@@ -256,12 +237,6 @@ func (fg *FuncGraph) findBTFInfo(sym Symbol) (btf.TypeID, *btf.Func) {
 }
 
 func (fg *FuncGraph) parseOption(opt Option) error {
-
-	if spec, err := btf.LoadKernelSpec(); err != nil {
-		return err
-	} else {
-		fg.btfSpec = spec
-	}
 
 	ksyms, err := NewKSymCache()
 	if err != nil {
@@ -995,26 +970,28 @@ func main() {
 		Commands: []*cli.Command{
 			{
 				Name:  "info",
-				Usage: "parse func expression and generate trace data",
+				Usage: "parse func expr and generate trace data",
 				Action: func(cCtx *cli.Context) error {
 					fn := cCtx.Args().First()
 					expr, err := ParseFuncWithPara(fn)
 					if err != nil {
 						return fmt.Errorf("parsing %q\n%w", fn, err)
 					}
-					spec, err := btf.LoadKernelSpec()
+					fmt.Printf("parsing %s\n", fn)
+					fmt.Printf("expr: %+v\n\n", expr)
+
+					spec, err := loadbtfSpec(expr.Module)
 					if err != nil {
 						return err
 					}
+
 					typ, err := spec.AnyTypeByName(expr.Name)
 					if err != nil {
 						return err
 					}
-					fmt.Printf("parsing %s\n", fn)
 					if btfData, ok := typ.(*btf.Func); ok {
 						s := showBtfFunc(btfData)
 						fmt.Printf("%s\n\n", s)
-						fmt.Printf("%+v\n\n", expr)
 						for _, data := range expr.Datas {
 							genTraceData(data, btfData)
 						}

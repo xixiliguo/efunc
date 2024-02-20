@@ -13,8 +13,9 @@ import (
 
 // support module symbol later
 type FuncExpr struct {
-	Name  string     `parser:"@Ident"`
-	Datas []DataExpr `parser:"(LeftEdge@@(Whitespace? Separator Whitespace? @@)*RightEdge)?"`
+	Module string     `parser:"(@Ident Colon)?"`
+	Name   string     `parser:"@Ident"`
+	Datas  []DataExpr `parser:"(LeftEdge@@(Whitespace? Separator Whitespace? @@)*RightEdge)?"`
 }
 
 type DataExpr struct {
@@ -185,6 +186,7 @@ var funcParserFunc = sync.OnceValue[*participle.Parser[FuncExpr]](func() *partic
 		{Name: "ArrowOperator", Pattern: `->`},
 		{Name: "ShowString", Pattern: `:str`},
 		{Name: "Whitespace", Pattern: `[ \t]+`},
+		{Name: "Colon", Pattern: `:`},
 		{Name: "Period", Pattern: `\.`},
 		{Name: "LeftEdge", Pattern: `\(`},
 		{Name: "RightEdge", Pattern: `\)`},
