@@ -69,6 +69,7 @@ struct func {
 	u32 id;
 	bool is_main_entry;
 	u8 name[MAX_FUNC_NAME_LEN];
+	u8 trace_cnt;
 	struct trace_data trace[MAX_TRACES];
 };
 
@@ -112,7 +113,8 @@ struct func_entry_event {
 	u32 id;
 	u64 time;
 	u64 para[PARA_LEN];
-	u8 buf[MAX_TRACE_BUF];
+	bool have_data;
+	u8 buf[0];
 };
 
 struct func_ret_event {
@@ -285,7 +287,7 @@ static __always_inline void print_event(struct call_event *e, char *when) {
 
 static __always_inline void extract_trace_data(struct func_entry_event *e, struct func *fn) {
 
-	for (int i=0; i < MAX_TRACES; i++) {
+	for (int i=0; i < fn->trace_cnt && i < MAX_TRACES; i++) {
 		u16 off = i * MAX_TRACE_DATA;
 		struct trace_data t = fn->trace[i];
 		if (t.size == 0) {
@@ -323,6 +325,16 @@ static __always_inline void extract_trace_data(struct func_entry_event *e, struc
 			}
 		}
 	}
+}
+
+
+static __always_inline void extract_func_paras(struct func_entry_event *e, struct pt_regs *ctx) {
+
+	e->para[0] = PT_REGS_PARM1(ctx);
+	e->para[1] = PT_REGS_PARM2(ctx);
+	e->para[2] = PT_REGS_PARM3(ctx);
+	e->para[3] = PT_REGS_PARM4(ctx);
+	e->para[4] = PT_REGS_PARM5(ctx);
 }
 
 
@@ -372,6 +384,8 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
 		start_info = bpf_ringbuf_reserve(&events, sizeof(struct start_event), 0);
 		if (!start_info) {
 			update_event_stat(START_EVENT_DROP);
+			bpf_map_delete_elem(&call_events, &task);
+			return 0;
 		} else {
 			update_event_stat(START_EVENT_SUCCESS);
 			start_info->type = START_EVENT;
@@ -398,28 +412,46 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
 		return 0;
 	}
 
-	struct func_entry_event *entry_info;
-	entry_info = bpf_ringbuf_reserve(&events, sizeof(struct func_entry_event), 0);
-	if (!entry_info) {
-		update_event_stat(ENTRY_EVENT_DROP);
+	if (fn->trace_cnt == 0) {
+		struct func_entry_event *entry_info;
+		entry_info = bpf_ringbuf_reserve(&events, sizeof(struct func_entry_event), 0);
+		if (!entry_info) {
+			update_event_stat(ENTRY_EVENT_DROP);
+		} else {
+			update_event_stat(ENTRY_EVENT_SUCCESS);
+			entry_info->type = ENTRY_EVENT;
+			entry_info->task = task;
+			entry_info->cpu_id = bpf_get_smp_processor_id();
+			entry_info->depth = d;
+			entry_info->seq_id = e->next_seq_id;
+			entry_info->ip = ip;
+			entry_info->id = fn->id;
+			entry_info->time = bpf_ktime_get_ns();
+			extract_func_paras(entry_info, ctx);
+			bpf_ringbuf_submit(entry_info, 0);
+		}
 	} else {
-		update_event_stat(ENTRY_EVENT_SUCCESS);
-		entry_info->type = ENTRY_EVENT;
-		entry_info->task = task;
-		entry_info->cpu_id = bpf_get_smp_processor_id();
-		entry_info->depth = d;
-		entry_info->seq_id = e->next_seq_id;
-		entry_info->ip = ip;
-		entry_info->id = fn->id;
-		entry_info->time = bpf_ktime_get_ns();
-		entry_info->para[0] = PT_REGS_PARM1(ctx);
-		entry_info->para[1] = PT_REGS_PARM2(ctx);
-		entry_info->para[2] = PT_REGS_PARM3(ctx);
-		entry_info->para[3] = PT_REGS_PARM4(ctx);
-		entry_info->para[4] = PT_REGS_PARM5(ctx);
-		extract_trace_data(entry_info, fn);
-		bpf_ringbuf_submit(entry_info, 0);
+		struct func_entry_event *entry_info;
+		entry_info = bpf_ringbuf_reserve(&events, sizeof(struct func_entry_event) + MAX_TRACE_BUF, 0);
+		if (!entry_info) {
+			update_event_stat(ENTRY_EVENT_DROP);
+		} else {
+			update_event_stat(ENTRY_EVENT_SUCCESS);
+			entry_info->type = ENTRY_EVENT;
+			entry_info->task = task;
+			entry_info->cpu_id = bpf_get_smp_processor_id();
+			entry_info->depth = d;
+			entry_info->seq_id = e->next_seq_id;
+			entry_info->ip = ip;
+			entry_info->id = fn->id;
+			entry_info->time = bpf_ktime_get_ns();
+			extract_func_paras(entry_info, ctx);
+			entry_info->have_data = true;
+			extract_trace_data(entry_info, fn);
+			bpf_ringbuf_submit(entry_info, 0);
+		}
 	}
+	
 	e->next_seq_id++;
 	e->ips[d] = ip;
 	e->durations[d] = bpf_ktime_get_ns();

@@ -84,9 +84,19 @@ type FuncEvent struct {
 	Id       uint32
 	Time     uint64
 	Para     [5]uint64
-	Buf      [5120]uint8
+	Buf      *[5120]uint8
 	Duration uint64
 	Ret      uint64
+}
+
+type FuncEvents []FuncEvent
+
+func (es *FuncEvents) Add(e FuncEvent) {
+	*es = append(*es, e)
+}
+
+func (es *FuncEvents) Reset() {
+	*es = (*es)[:0]
 }
 
 type FuncGraph struct {
@@ -109,8 +119,9 @@ type FuncGraph struct {
 	haveGetFuncIP   bool
 	kretOffset      uint64
 	bootTime        uint64
-	taskToEvents    map[uint64][]FuncEvent
+	taskToEvents    map[uint64]*FuncEvents
 	eventsPool      sync.Pool
+	dataPool        sync.Pool
 	s               *strings.Builder
 	output          *os.File
 	stopper         chan os.Signal
@@ -128,7 +139,7 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 		idToFuncs:      map[btf.TypeID]FuncInfo{},
 		pids:           map[uint32]bool{},
 		comms:          map[[16]uint8]bool{},
-		taskToEvents:   map[uint64][]FuncEvent{},
+		taskToEvents:   map[uint64]*FuncEvents{},
 		s:              &strings.Builder{},
 	}
 
@@ -137,8 +148,13 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 	}
 	fg.eventsPool = sync.Pool{
 		New: func() interface{} {
-			e := make([]FuncEvent, 0, 64)
+			e := make(FuncEvents, 0, 64)
 			return &e
+		},
+	}
+	fg.dataPool = sync.Pool{
+		New: func() interface{} {
+			return &[5120]uint8{}
 		},
 	}
 
@@ -504,10 +520,10 @@ func (fg *FuncGraph) showStats() {
 			retDropCnt = cnt
 		}
 	}
-	fmt.Printf("CALL_EVENT: %d/%d\n", callSucessCnt, callDropCnt)
 	fmt.Printf("START_EVENT: %d/%d\n", startSucessCnt, startDropCnt)
 	fmt.Printf("ENTRY_EVENT: %d/%d\n", entrySucessCnt, entryDropCnt)
 	fmt.Printf("RET_EVENT: %d/%d\n", retSucessCnt, retDropCnt)
+	fmt.Printf("CALL_EVENT: %d/%d\n", callSucessCnt, callDropCnt)
 }
 
 func (fg *FuncGraph) load() error {
@@ -558,6 +574,7 @@ func (fg *FuncGraph) load() error {
 			IsMainEntry: fn.isEntry,
 			Name:        name,
 		}
+		f.TraceCnt = uint8(len(fn.trace))
 		for i, t := range fn.trace {
 			ft := funcgraphTraceData{
 				Para:     uint8(t.Para),
@@ -702,22 +719,22 @@ func (fg *FuncGraph) run() error {
 			// 	fmt.Printf("parsing ringbuf event: %s\n", err)
 			// 	os.Exit(1)
 			// }
+
+			// when miss last CallEvent, clean all pending events
 			if es, ok := fg.taskToEvents[startEvent.Task]; ok {
-				fmt.Printf("No call event received, delete %d events of task %#x anyway\n", len(es), startEvent.Task)
+				fmt.Printf("no call event received, delete %d events of task %#x anyway\n", len(*es), startEvent.Task)
 				delete(fg.taskToEvents, startEvent.Task)
 			}
-			empty := fg.eventsPool.Get().(*[]FuncEvent)
-			*empty = (*empty)[:0]
-			fg.taskToEvents[startEvent.Task] = *empty
+			empty := fg.eventsPool.Get().(*FuncEvents)
+			empty.Reset()
+			fg.taskToEvents[startEvent.Task] = empty
 		case EntryEvent:
 			entryEvent := (*funcgraphFuncEntryEvent)(unsafe.Pointer(unsafe.SliceData(rec.RawSample)))
 			task := entryEvent.Task
 			if _, ok := fg.taskToEvents[task]; !ok {
-				fmt.Printf("no trace_start event before\n")
+				fmt.Printf("no trace_start event before receive entry event of task %#x\n", task)
 			}
-			// fmt.Printf("receive funcevent %+v\n", funcEvent)
-			events := fg.taskToEvents[task]
-			events = append(events, FuncEvent{
+			e := FuncEvent{
 				Type:  entryEvent.Type,
 				Task:  entryEvent.Task,
 				CpuId: entryEvent.CpuId,
@@ -727,8 +744,16 @@ func (fg *FuncGraph) run() error {
 				Id:    entryEvent.Id,
 				Time:  entryEvent.Time,
 				Para:  entryEvent.Para,
-				Buf:   entryEvent.Buf,
-			})
+			}
+			if entryEvent.HaveData {
+				empty := fg.dataPool.Get().(*[5120]uint8)
+				e.Buf = empty
+				copy(e.Buf[:], unsafe.Slice(unsafe.SliceData(entryEvent.Buf[:]), 5120))
+			}
+
+			// fmt.Printf("receive funcevent %+v\n", funcEvent)
+			events := fg.taskToEvents[task]
+			events.Add(e)
 			fg.taskToEvents[task] = events
 		case RetEvent:
 			retEvent := (*funcgraphFuncRetEvent)(unsafe.Pointer(unsafe.SliceData(rec.RawSample)))
@@ -738,11 +763,11 @@ func (fg *FuncGraph) run() error {
 			// }
 			task := retEvent.Task
 			if _, ok := fg.taskToEvents[task]; !ok {
-				fmt.Printf("no trace_start event before\n")
+				fmt.Printf("no trace_start event before receive ret event of task %#x\n", task)
 			}
 			// fmt.Printf("receive funcevent %+v\n", funcEvent)
-			events := fg.taskToEvents[task]
-			events = append(events, FuncEvent{
+
+			e := FuncEvent{
 				Type:     retEvent.Type,
 				Task:     retEvent.Task,
 				CpuId:    retEvent.CpuId,
@@ -753,7 +778,9 @@ func (fg *FuncGraph) run() error {
 				Time:     retEvent.Time,
 				Duration: retEvent.Duration,
 				Ret:      retEvent.Ret,
-			})
+			}
+			events := fg.taskToEvents[task]
+			events.Add(e)
 			fg.taskToEvents[task] = events
 		default:
 			fmt.Printf("unknow event type: %c, exiting\n", rec.RawSample[0])
@@ -791,15 +818,21 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent, s *strings.Build
 	s.WriteString("\n")
 	fg.output.WriteString(s.String())
 
-	events = events[:0]
-	fg.eventsPool.Put(&events)
+	for _, e := range *events {
+		if e.Buf != nil {
+			fg.dataPool.Put(e.Buf)
+		}
+		e.Buf = nil
+	}
+	fg.eventsPool.Put(events)
+	fg.taskToEvents[event.Task] = nil
 	delete(fg.taskToEvents, event.Task)
 }
 
-func (fg *FuncGraph) handleFuncEvent(events []FuncEvent, s *strings.Builder) {
+func (fg *FuncGraph) handleFuncEvent(es *FuncEvents, s *strings.Builder) {
 	s.WriteString(" CPU   DURATION | FUNCTION GRAPH\n")
 	s.WriteString(" ---   -------- | --------------\n")
-
+	events := *es
 	prevSeqId := uint64(0)
 	for i := 0; i < len(events); i++ {
 		e := &events[i]

@@ -35,24 +35,27 @@ type funcgraphFunc struct {
 	Id          uint32
 	IsMainEntry bool
 	Name        [40]uint8
-	_           [3]byte
+	TraceCnt    uint8
+	_           [2]byte
 	Trace       [5]funcgraphTraceData
 }
 
 type funcgraphFuncEntryEvent struct {
-	Type  uint8
-	_     [7]byte
-	Task  uint64
-	CpuId uint32
-	_     [4]byte
-	Depth uint64
-	SeqId uint64
-	Ip    uint64
-	Id    uint32
-	_     [4]byte
-	Time  uint64
-	Para  [5]uint64
-	Buf   [5120]uint8
+	Type     uint8
+	_        [7]byte
+	Task     uint64
+	CpuId    uint32
+	_        [4]byte
+	Depth    uint64
+	SeqId    uint64
+	Ip       uint64
+	Id       uint32
+	_        [4]byte
+	Time     uint64
+	Para     [5]uint64
+	HaveData bool
+	Buf      [0]uint8
+	_        [7]byte
 }
 
 type funcgraphFuncRetEvent struct {
