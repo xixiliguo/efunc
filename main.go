@@ -126,6 +126,7 @@ type FuncGraph struct {
 	output          *os.File
 	stopper         chan os.Signal
 	objs            funcgraphObjects
+	opt             *dumpOption
 }
 
 func NewFuncGraph(opt Option) (*FuncGraph, error) {
@@ -156,6 +157,12 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 		New: func() interface{} {
 			return &[5120]uint8{}
 		},
+	}
+
+	if opt, err := NewDumpOption(); err != nil {
+		return nil, err
+	} else {
+		fg.opt = opt
 	}
 
 	return fg, nil
@@ -867,18 +874,20 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents, s *strings.Builder) {
 					if sz > 1024 {
 						sz = 1024
 					}
-					opt := dumpOption{
-						data:    e.Buf[off : off+sz],
-						isStr:   t.isStr,
-						level:   int(9 + e.Depth),
-						offset:  0,
-						bitOff:  0,
-						bitSize: 0,
-						ksyms:   &fg.ksyms,
-						s:       s,
-					}
+					fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(9+e.Depth))
+					// opt := dumpOption{
+					// 	data:    e.Buf[off : off+sz],
+					// 	isStr:   t.isStr,
+					// 	level:   int(9 + e.Depth),
+					// 	offset:  0,
+					// 	bitOff:  0,
+					// 	bitSize: 0,
+					// 	ksyms:   &fg.ksyms,
+					// 	s:       s,
+					// }
 
-					dumpDataByBTF(opt, t.Name, t.Typ)
+					fg.opt.dumpDataByBTF(t.Name, t.Typ)
+					s.WriteString(fg.opt.String())
 				}
 				i++
 				prevSeqId = ret.SeqId
@@ -892,17 +901,19 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents, s *strings.Builder) {
 					if sz > 1024 {
 						sz = 1024
 					}
-					opt := dumpOption{
-						data:    e.Buf[off : off+sz],
-						isStr:   t.isStr,
-						level:   int(9 + e.Depth),
-						offset:  0,
-						bitOff:  0,
-						bitSize: 0,
-						ksyms:   &fg.ksyms,
-						s:       s,
-					}
-					dumpDataByBTF(opt, t.Name, t.Typ)
+					fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(9+e.Depth))
+					// opt := dumpOption{
+					// 	data:    e.Buf[off : off+sz],
+					// 	isStr:   t.isStr,
+					// 	level:   int(9 + e.Depth),
+					// 	offset:  0,
+					// 	bitOff:  0,
+					// 	bitSize: 0,
+					// 	ksyms:   &fg.ksyms,
+					// 	s:       s,
+					// }
+					fg.opt.dumpDataByBTF(t.Name, t.Typ)
+					s.WriteString(fg.opt.String())
 				}
 			}
 		} else {

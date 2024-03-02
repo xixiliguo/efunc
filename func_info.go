@@ -206,14 +206,61 @@ func ParseFuncWithPara(s string) (*FuncExpr, error) {
 
 func showBtfFunc(fn *btf.Func) (s string) {
 	if proto, ok := fn.Type.(*btf.FuncProto); ok {
-		s = toString(proto.Return)
+		s = typToString(proto.Return)
 		s += fmt.Sprintf(" %s(", fn.Name)
 		paras := []string{}
 		for _, para := range proto.Params {
-			paras = append(paras, toString(para.Type)+para.Name)
+			paras = append(paras, typToString(para.Type)+para.Name)
 		}
 		s += strings.Join(paras, ", ")
 		s += ")"
 	}
 	return s
+}
+
+func typToString(typ btf.Type) string {
+
+	re := ""
+	typ = btf.UnderlyingType(typ)
+	switch t := typ.(type) {
+	case *btf.Int:
+		if t.Name == "_Bool" {
+			return "bool"
+		}
+		re = t.Name
+	case *btf.Struct:
+		re = "struct " + t.Name
+	case *btf.Void:
+		re = "void"
+	case *btf.FuncProto:
+		s := typToString(t.Return)
+		s += " (*func)("
+		paras := []string{}
+		for _, para := range t.Params {
+			paras = append(paras, typToString(para.Type))
+		}
+		s += strings.Join(paras, ", ")
+		s += ")"
+		re = s
+	case *btf.Pointer:
+		tt := btf.UnderlyingType(t.Target)
+		if pp, ok := tt.(*btf.Pointer); ok {
+			return typToString(pp.Target) + " **"
+		}
+		if pp, ok := tt.(*btf.FuncProto); ok {
+			return typToString(pp)
+		}
+		re = typToString(t.Target) + " *"
+	case *btf.Array:
+		re = fmt.Sprintf("%s[%d]", typToString(t.Type), t.Nelems)
+	case *btf.Fwd:
+		re = fmt.Sprintf("%s %s", t.Kind, t.Name)
+	case *btf.Union:
+		re = "union " + t.Name
+	case *btf.Enum:
+		re = "enum " + t.Name
+	default:
+		re = fmt.Sprintf("don't know how to toString Type %v", typ)
+	}
+	return re
 }
