@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"unsafe"
 
@@ -20,7 +19,7 @@ type dumpOption struct {
 	bitOff         int
 	bitSize        int
 	ksyms          *KSymCache
-	s              *strings.Builder
+	buf            *bytes.Buffer
 	spaceCache     [1024]byte
 	prefixCache    map[string]string
 	typStringCache map[btf.Type]string
@@ -39,7 +38,7 @@ func NewDumpOption() (*dumpOption, error) {
 		bitOff:         0,
 		bitSize:        0,
 		ksyms:          &k,
-		s:              &strings.Builder{},
+		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
 		prefixCache:    make(map[string]string),
 		typStringCache: make(map[btf.Type]string),
 	}
@@ -58,12 +57,12 @@ func (opt *dumpOption) Reset(data []byte, isStr bool, level int) {
 	opt.offset = 0
 	opt.bitOff = 0
 	opt.bitSize = 0
-	opt.s.Reset()
-	opt.s.Grow(len(data) * 2)
+	opt.buf.Reset()
+	// opt.buf.Grow(len(data) * 2)
 }
 
 func (opt *dumpOption) String() string {
-	return opt.s.String()
+	return toString(opt.buf.Bytes())
 }
 
 func (opt *dumpOption) toString(typ btf.Type) string {
@@ -77,7 +76,7 @@ func (opt *dumpOption) toString(typ btf.Type) string {
 
 func (opt *dumpOption) WriteStrings(ss ...string) {
 	for i := 0; i < len(ss); i++ {
-		opt.s.WriteString(ss[i])
+		opt.buf.WriteString(ss[i])
 	}
 }
 
@@ -86,7 +85,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type) bool {
 	offset := opt.offset
 	level := opt.level
 	data := opt.data
-	s := opt.s
+	// s := opt.buf
 
 	// space := strings.Repeat("  ", level)
 	space := toString(opt.spaceCache[:2*level])
@@ -338,7 +337,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type) bool {
 				opt.WriteStrings("<", sym.Name, ">")
 			}
 		}
-		opt.s.WriteString("\n")
+		opt.buf.WriteString("\n")
 		// fmt.Fprintf(s, "%s%s (%s)%#x %s\n", space, prefix, toString(t), p, symInfo)
 	case *btf.Enum:
 		if t.Signed {
@@ -367,7 +366,9 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type) bool {
 			}
 		}
 	default:
-		fmt.Fprintf(s, "%s%s don't know how to print %v\n", space, prefix, t)
+		typ := fmt.Sprintf("%v", t)
+		opt.WriteStrings(space, prefix, " don't know how to print ", typ, "\n")
+		// fmt.Fprintf(s, "%s%s don't know how to print %v\n", space, prefix, t)
 	}
 	return true
 }
