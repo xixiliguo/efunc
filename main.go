@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -801,11 +802,39 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent, s *strings.Build
 	s.Reset()
 	s.Grow(4096)
 
-	start := time.Unix(int64(fg.bootTime), int64(event.StartTime)).Format("15:04:05.000000")
-	end := time.Unix(int64(fg.bootTime), int64(event.EndTime)).Format("15:04:05.000000")
+	var t [1024]byte
+	b := t[:0]
 
-	fmt.Fprintf(s, "TIME: %s -> %s PID/TID: %d/%d (%s %s) \n", start, end, event.Pid, event.Tid,
-		unix.ByteSliceToString(event.GroupComm[:]), unix.ByteSliceToString(event.Comm[:]))
+	// start := time.Unix(int64(fg.bootTime), int64(event.StartTime)).Format("15:04:05.000000")
+	// end := time.Unix(int64(fg.bootTime), int64(event.EndTime)).Format("15:04:05.000000")
+
+	// fmt.Fprintf(s, "TIME: %s -> %s PID/TID: %d/%d (%s %s) \n", start, end, event.Pid, event.Tid,
+	// 	unix.ByteSliceToString(event.GroupComm[:]), unix.ByteSliceToString(event.Comm[:]))
+
+	s.WriteString("TIME: ")
+	b = t[:0]
+	b = time.Unix(int64(fg.bootTime), int64(event.StartTime)).AppendFormat(b, "15:04:05.000000")
+	s.Write(b)
+	// s.WriteString(start)
+	s.WriteString(" -> ")
+	b = t[:0]
+	b = time.Unix(int64(fg.bootTime), int64(event.EndTime)).AppendFormat(b, "15:04:05.000000")
+	s.Write(b)
+	s.WriteString(" PID/TID: ")
+	b = t[:0]
+	b = strconv.AppendUint(b, uint64(event.Pid), 10)
+	s.Write(b)
+	// s.WriteString(strconv.FormatUint(uint64(event.Pid), 10))
+	s.WriteString("/")
+	b = t[:0]
+	b = strconv.AppendUint(b, uint64(event.Tid), 10)
+	s.Write(b)
+	// s.WriteString(strconv.FormatUint(uint64(event.Tid), 10))
+	s.WriteString(" (")
+	s.WriteString(ByteSliceToString(event.GroupComm[:]))
+	s.WriteString(" ")
+	s.WriteString(ByteSliceToString(event.Comm[:]))
+	s.WriteString(") \n")
 
 	events := fg.taskToEvents[event.Task]
 	fg.handleFuncEvent(events, s)
@@ -819,7 +848,16 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent, s *strings.Build
 			mod = "[" + sym.Module + "]"
 		}
 		// stackLine := fmt.Sprintf()
-		fmt.Fprintf(s, "%s+%#x %s\n", sym.Name, addr-sym.Addr, mod)
+		b = t[:0]
+		b = strconv.AppendUint(b, addr-sym.Addr, 16)
+		// off := strconv.FormatUint(addr-sym.Addr, 16)
+		s.WriteString(sym.Name)
+		s.WriteString("+0x")
+		s.Write(b)
+		s.WriteString(" ")
+		s.WriteString(mod)
+		s.WriteString("\n")
+		// fmt.Fprintf(s, "%s+%#x %s\n", sym.Name, addr-sym.Addr, mod)
 		// buf.WriteString(stackLine)
 	}
 	s.WriteString("\n")
@@ -935,6 +973,7 @@ func (fg *FuncGraph) ShowFuncPara(e *FuncEvent, s *strings.Builder) {
 	funcInfo := fg.idToFuncs[btf.TypeID(e.Id)]
 	bFunc := funcInfo.btfinfo
 	bFuncProto := bFunc.Type.(*btf.FuncProto)
+	var n [1024]byte
 
 	for i, p := range bFuncProto.Params {
 		if i >= 5 {
@@ -946,26 +985,51 @@ func (fg *FuncGraph) ShowFuncPara(e *FuncEvent, s *strings.Builder) {
 		typ := btf.UnderlyingType(p.Type)
 		switch t := typ.(type) {
 		case *btf.Pointer:
-			fmt.Fprintf(s, "%s=%#x", p.Name, e.Para[i])
+			s.WriteString(p.Name)
+			s.WriteString("=0x")
+			b := n[:0]
+			b = strconv.AppendUint(b, e.Para[i], 16)
+			s.Write(b)
+			// fmt.Fprintf(s, "%s=%#x", p.Name, e.Para[i])
 		case *btf.Int:
+			b := n[:0]
 			switch {
 			case t.Encoding == btf.Signed && t.Size == 4:
-				fmt.Fprintf(s, "%s=%v", p.Name, int32(e.Para[i]))
+				b = strconv.AppendInt(b, int64(int32(e.Para[i])), 10)
+				// fmt.Fprintf(s, "%s=%v", p.Name, int32(e.Para[i]))
 			case t.Encoding == btf.Signed && t.Size == 8:
-				fmt.Fprintf(s, "%s=%v", p.Name, int64(e.Para[i]))
+				b = strconv.AppendInt(b, int64(e.Para[i]), 10)
+				// fmt.Fprintf(s, "%s=%v", p.Name, int64(e.Para[i]))
 			case t.Encoding == btf.Unsigned && t.Size == 4:
-				fmt.Fprintf(s, "%s=%v", p.Name, uint32(e.Para[i]))
+				b = strconv.AppendUint(b, uint64(uint32(e.Para[i])), 10)
+				// fmt.Fprintf(s, "%s=%v", p.Name, uint32(e.Para[i]))
 			case t.Encoding == btf.Unsigned && t.Size == 8:
-				fmt.Fprintf(s, "%s=%v", p.Name, uint64(e.Para[i]))
+				b = strconv.AppendUint(b, uint64((e.Para[i])), 10)
+				// fmt.Fprintf(s, "%s=%v", p.Name, uint64(e.Para[i]))
 			case t.Encoding == btf.Char:
-				fmt.Fprintf(s, "%s=%v", p.Name, byte(e.Para[i]))
+				b = strconv.AppendUint(b, uint64(byte(e.Para[i])), 10)
+				// fmt.Fprintf(s, "%s=%v", p.Name, byte(e.Para[i]))
 			case t.Encoding == btf.Bool:
-				fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i] != 0)
+				if e.Para[i] != 0 {
+					b = append(b, "true"...)
+				} else {
+					b = append(b, "false"...)
+				}
+				// fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i] != 0)
 			default:
-				fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i])
+				b = strconv.AppendUint(b, e.Para[i], 10)
+				// fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i])
 			}
+			s.WriteString(p.Name)
+			s.WriteString("=")
+			s.Write(b)
 		default:
-			fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i])
+			s.WriteString(p.Name)
+			s.WriteString("=")
+			b := n[:0]
+			b = strconv.AppendUint(b, e.Para[i], 10)
+			s.Write(b)
+			// fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i])
 		}
 	}
 

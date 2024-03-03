@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -417,4 +418,11 @@ func toString(b []byte) string {
 		return ""
 	}
 	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
+func ByteSliceToString(s []byte) string {
+	if i := bytes.IndexByte(s, 0); i != -1 {
+		s = s[:i]
+	}
+	return toString(s)
 }
