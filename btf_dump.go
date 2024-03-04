@@ -8,7 +8,6 @@ import (
 	"unsafe"
 
 	"github.com/cilium/ebpf/btf"
-	"golang.org/x/sys/unix"
 )
 
 type dumpOption struct {
@@ -21,8 +20,8 @@ type dumpOption struct {
 	ksyms          *KSymCache
 	buf            *bytes.Buffer
 	spaceCache     [1024]byte
-	prefixCache    map[string]string
 	typStringCache map[btf.Type]string
+	typSizeCache   map[btf.Type]int
 }
 
 func NewDumpOption() (*dumpOption, error) {
@@ -39,13 +38,12 @@ func NewDumpOption() (*dumpOption, error) {
 		bitSize:        0,
 		ksyms:          &k,
 		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
-		prefixCache:    make(map[string]string),
 		typStringCache: make(map[btf.Type]string),
+		typSizeCache:   make(map[btf.Type]int),
 	}
 	for i := 0; i < len(d.spaceCache); i++ {
 		d.spaceCache[i] = ' '
 	}
-	d.prefixCache[""] = ""
 
 	return &d, nil
 }
@@ -58,20 +56,31 @@ func (opt *dumpOption) Reset(data []byte, isStr bool, level int) {
 	opt.bitOff = 0
 	opt.bitSize = 0
 	opt.buf.Reset()
-	// opt.buf.Grow(len(data) * 2)
 }
 
 func (opt *dumpOption) String() string {
 	return toString(opt.buf.Bytes())
 }
 
-func (opt *dumpOption) toString(typ btf.Type) string {
+func (opt *dumpOption) typString(typ btf.Type) string {
 	if s, ok := opt.typStringCache[typ]; ok {
 		return s
 	}
 	re := typToString(typ)
 	opt.typStringCache[typ] = re
 	return re
+}
+
+func (opt *dumpOption) typSize(typ btf.Type) (int, error) {
+	if sz, ok := opt.typSizeCache[typ]; ok {
+		return sz, nil
+	}
+	sz, err := btf.Sizeof(typ)
+	if err != nil {
+		return sz, err
+	}
+	opt.typSizeCache[typ] = sz
+	return sz, nil
 }
 
 func (opt *dumpOption) WriteStrings(ss ...string) {
@@ -85,61 +94,36 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type) bool {
 	offset := opt.offset
 	level := opt.level
 	data := opt.data
-	// s := opt.buf
 
-	// space := strings.Repeat("  ", level)
 	space := toString(opt.spaceCache[:2*level])
-	if sz, err := btf.Sizeof(typ); err != nil {
+	if sz, err := opt.typSize(typ); err != nil {
 		opt.WriteStrings(space, "don't know ", name, " size: ", err.Error(), "\n")
-		// fmt.Fprintf(s, "%sdon't know %s size: %s\n", space, name, err)
 		return false
 	} else {
 		if offset != 0 && offset+sz > len(data) {
 			cnt := strconv.FormatInt(int64(offset), 10)
 			opt.WriteStrings(space, "/* only show first ", cnt, " bytes */\n")
-			// fmt.Fprintf(s, "%s/* only show first %d bytes */\n", space, offset)
 			return false
 		}
 	}
 
-	prefix := ""
-	if r, ok := opt.prefixCache[name]; ok {
-		prefix = r
-	} else {
-		opt.prefixCache[name] = name + " ="
-		prefix = opt.prefixCache[name]
+	connector := ""
+	if name != "" {
+		connector = " = "
 	}
 
 	if opt.isStr {
-		re := unix.ByteSliceToString(data[offset:])
-		opt.WriteStrings(space, prefix, re, "\n")
-		// fmt.Fprintf(s, "%s%s %s\n", space, prefix)
+		re := ByteSliceToString(data[offset:])
+		opt.WriteStrings(space, name, connector, re, "\n")
 		return true
 	}
 
 	typ = btf.UnderlyingType(typ)
 	switch t := typ.(type) {
 	case *btf.Union:
-		opt.WriteStrings(space, prefix, " (", opt.toString(t), ") {\n")
-		// opt.s.Write(space)
-		// opt.s.Write([]byte(prefix))
-		// opt.s.WriteString(" (")
-		// opt.s.WriteString(opt.toString(t))
-		// opt.s.WriteString(") {\n")
-		// fmt.Fprintf(s, "%s%s (%s) {\n", space, prefix, toString(t))
+		opt.WriteStrings(space, name, connector, "(", opt.typString(t), ") {\n")
 		for _, mem := range t.Members {
 			memOff, memBitOff := mem.Offset/8, mem.Offset%8
-
-			// childOpt := dumpOption{
-			// 	data:    data,
-			// 	isStr:   false,
-			// 	level:   level + 1,
-			// 	offset:  offset + int(memOff),
-			// 	bitOff:  int(memBitOff),
-			// 	bitSize: int(mem.BitfieldSize),
-			// 	ksyms:   opt.ksyms,
-			// 	s:       s,
-			// }
 			opt.level++
 			opt.offset += int(memOff)
 			opt.bitOff = int(memBitOff)
@@ -152,29 +136,10 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type) bool {
 			}
 		}
 		opt.WriteStrings(space, "}\n")
-		// opt.s.WriteString(space)
-		// opt.s.WriteString("}\n")
-		// fmt.Fprintf(s, "%s}\n", space)
 	case *btf.Struct:
-		opt.WriteStrings(space, prefix, " (", opt.toString(t), ") {\n")
-		// opt.s.Write(space)
-		// opt.s.Write([]byte(prefix))
-		// opt.s.WriteString(" (")
-		// opt.s.WriteString(opt.toString(t))
-		// opt.s.WriteString(") {\n")
-		// fmt.Fprintf(s, "%s%s (%s) {\n", space, prefix, toString(t))
+		opt.WriteStrings(space, name, connector, "(", opt.typString(t), ") {\n")
 		for _, mem := range t.Members {
 			memOff, memBitOff := mem.Offset/8, mem.Offset%8
-			// childOpt := dumpOption{
-			// 	data:    data,
-			// 	isStr:   false,
-			// 	level:   level + 1,
-			// 	offset:  offset + int(memOff),
-			// 	bitOff:  int(memBitOff),
-			// 	bitSize: int(mem.BitfieldSize),
-			// 	ksyms:   opt.ksyms,
-			// 	s:       s,
-			// }
 			opt.level++
 			opt.offset += int(memOff)
 			opt.bitOff = int(memBitOff)
@@ -187,48 +152,21 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type) bool {
 			}
 		}
 		opt.WriteStrings(space, "}\n")
-		// opt.s.WriteString(space)
-		// opt.s.WriteString("}\n")
-		// fmt.Fprintf(s, "%s}\n", space)
+
 	case *btf.Array:
 		// special case for char[]
 		sz, _ := btf.Sizeof(t.Type)
 		if end := offset + int(t.Nelems); sz == 1 && end <= len(data) {
-			// opt.s.WriteString(space)
-			// opt.s.Write([]byte(prefix))
-			// opt.s.WriteString(" (")
-			// opt.s.WriteString(opt.toString(t.Type))
-			// opt.s.WriteString("[")
 			n := strconv.FormatUint(uint64(t.Nelems), 10)
-			// opt.s.WriteString(n)
-			// opt.s.WriteString("]) ")
-
 			p := make([]byte, 0, 128)
 			d := data[offset : offset+int(t.Nelems)]
 			p = strconv.AppendQuote(p, toString(d))
-
-			// opt.s.Write(p)
-
-			// opt.s.WriteByte('\n')
-			opt.WriteStrings(space, prefix, " (", opt.toString(t.Type), "[", n, "]) ", toString(p), "\n")
-			// fmt.Fprintf(s, "%s%s (%s[%d)) %q\n", space, prefix, toString(t.Type), t.Nelems, data[offset:offset+int(t.Nelems)])
+			opt.WriteStrings(space, name, connector, "(", opt.typString(t.Type), "[", n, "]) ", toString(p), "\n")
 			return true
 		}
 		cnt := strconv.FormatUint(uint64(t.Nelems), 10)
-		opt.WriteStrings(space, prefix, " (", opt.toString(t.Type), "[", cnt, ")) {\n")
-		// fmt.Fprintf(s, "%s%s (%s[%d)) {\n", space, prefix, opt.toString(t.Type), t.Nelems)
-
+		opt.WriteStrings(space, name, connector, "(", opt.typString(t.Type), "[", cnt, ")) {\n")
 		for i := 0; i < int(t.Nelems); i++ {
-			// childOpt := dumpOption{
-			// 	data:    data,
-			// 	isStr:   false,
-			// 	level:   level + 1,
-			// 	offset:  offset + i*sz,
-			// 	bitOff:  0,
-			// 	bitSize: 0,
-			// 	ksyms:   opt.ksyms,
-			// 	s:       s,
-			// }
 			opt.level++
 			opt.offset += i * sz
 			opt.bitOff = 0
@@ -241,7 +179,6 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type) bool {
 			}
 		}
 		opt.WriteStrings(space, "}\n")
-		// fmt.Fprintf(s, "%s}\n", space)
 	case *btf.Int:
 		msg := make([]byte, 0, 32)
 		switch {
@@ -249,52 +186,52 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type) bool {
 			d := *(*int8)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
 			msg = append(msg, "0x"...)
 			msg = strconv.AppendInt(msg, int64(d), 16)
-			// msg = fmt.Sprintf("%#x", d)
 			if data[offset] >= 0x20 && data[offset] <= 0x7e {
-				msg = fmt.Appendf(msg, "%#x /* %c */", data[offset], data[offset])
+				msg = append(msg, " /* "...)
+				msg = append(msg, data[offset])
+				msg = append(msg, " */"...)
 			}
 		case t.Encoding == btf.Signed && t.Size == 2:
 			d := *(*int16)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
 			msg = append(msg, "0x"...)
 			msg = strconv.AppendInt(msg, int64(d), 16)
-			// msg = fmt.Sprintf("%#x", d)
 		case t.Encoding == btf.Signed && t.Size == 4:
 			d := *(*int32)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
 			msg = append(msg, "0x"...)
 			msg = strconv.AppendInt(msg, int64(d), 16)
-			// msg = fmt.Sprintf("%#x", d)
 		case t.Encoding == btf.Signed && t.Size == 8:
 			d := *(*int64)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
 			msg = append(msg, "0x"...)
 			msg = strconv.AppendInt(msg, int64(d), 16)
-			// msg = fmt.Sprintf("%#x", d)
 		case t.Encoding == btf.Unsigned && t.Size == 1:
 			d := *(*uint8)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
 			msg = append(msg, "0x"...)
 			msg = strconv.AppendUint(msg, uint64(d), 16)
-			// msg = fmt.Sprintf("%#x", d)
 			if data[offset] >= 0x20 && data[offset] <= 0x7e {
-				msg = fmt.Appendf(msg, "%#x /* %c */", data[offset], data[offset])
+				msg = append(msg, " /* "...)
+				msg = append(msg, data[offset])
+				msg = append(msg, " */"...)
 			}
 		case t.Encoding == btf.Unsigned && t.Size == 2:
 			d := *(*uint16)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
 			msg = append(msg, "0x"...)
 			msg = strconv.AppendUint(msg, uint64(d), 16)
-			// msg = fmt.Sprintf("%#x", d)
 		case t.Encoding == btf.Unsigned && t.Size == 4:
 			d := *(*uint32)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
 			msg = append(msg, "0x"...)
 			msg = strconv.AppendUint(msg, uint64(d), 16)
-			// msg = fmt.Sprintf("%#x", d)
 		case t.Encoding == btf.Unsigned && t.Size == 8:
 			d := *(*uint64)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
 			msg = append(msg, "0x"...)
 			msg = strconv.AppendUint(msg, uint64(d), 16)
-			// msg = fmt.Sprintf("%#x", d)
 		case t.Encoding == btf.Char:
-			msg = fmt.Appendf(msg, "%#x", data[offset])
+			d := *(*uint8)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
+			msg = append(msg, "0x"...)
+			msg = strconv.AppendUint(msg, uint64(d), 16)
 			if data[offset] >= 0x20 && data[offset] <= 0x7e {
-				msg = fmt.Appendf(msg, "%#x /* %c */", data[offset], data[offset])
+				msg = append(msg, " /* "...)
+				msg = append(msg, data[offset])
+				msg = append(msg, " */"...)
 			}
 		case t.Encoding == btf.Bool:
 			if data[offset] != 0 {
@@ -302,73 +239,40 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type) bool {
 			} else {
 				msg = append(msg, "false"...)
 			}
-			// msg = fmt.Appendf(msg, "%t", data[offset] != 0)
 		default:
 			msg = fmt.Appendf(msg, "unkown(%v)", t)
 		}
-
-		opt.WriteStrings(space, prefix, " (", opt.toString(t), ")", toString(msg), "\n")
-		// opt.s.WriteString(space)
-		// opt.s.Write([]byte(prefix))
-		// opt.s.WriteString(" (")
-		// opt.s.WriteString(opt.toString(t))
-		// opt.s.WriteString(")")
-		// opt.s.Write(msg)
-		// opt.s.WriteString("\n")
-		// fmt.Fprintf(s, "%s%s (%s)%s\n", space, prefix, toString(t), msg)
+		opt.WriteStrings(space, name, connector, "(", opt.typString(t), ")", toString(msg), "\n")
 	case *btf.Pointer:
 		p := *(*uint64)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-
-		// opt.s.WriteString(space)
-		// opt.s.Write([]byte(prefix))
-		// opt.s.WriteString(" (")
-		// opt.s.WriteString(opt.toString(t))
-		// opt.s.WriteString(")")
-		// opt.s.WriteString("0x")
 		msg := make([]byte, 0, 32)
 		msg = strconv.AppendUint(msg, p, 16)
-		// opt.s.Write(msg)
-		// opt.s.WriteString(" ")
-		// opt.s.WriteString(symInfo)
-		// opt.s.WriteString("\n")
-		opt.WriteStrings(space, prefix, " (", opt.toString(t), ")", "0x", toString(msg), " ")
+		opt.WriteStrings(space, name, connector, "(", opt.typString(t), ")", "0x", toString(msg), " ")
 		if p != 0 {
 			if sym := opt.ksyms.SymbolByAddr(p, true); sym.Name != "" {
 				opt.WriteStrings("<", sym.Name, ">")
 			}
 		}
 		opt.buf.WriteString("\n")
-		// fmt.Fprintf(s, "%s%s (%s)%#x %s\n", space, prefix, toString(t), p, symInfo)
 	case *btf.Enum:
 		if t.Signed {
 			d := *(*int32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)])))
 			for _, value := range t.Values {
 				if value.Value == uint64(d) {
-					opt.WriteStrings(space, prefix, opt.toString(t), value.Name, "\n")
-					// fmt.Fprintf(s, "%s%s(%s) %s\n", space, prefix, opt.toString(t), value.Name)
+					opt.WriteStrings(space, name, connector, opt.typString(t), value.Name, "\n")
 				}
 			}
 		} else {
 			d := *(*uint32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)])))
 			for _, value := range t.Values {
 				if value.Value == uint64(d) {
-					// opt.s.WriteString(space)
-					// opt.s.Write([]byte(prefix))
-					// opt.s.WriteString("(")
-					// opt.s.WriteString(opt.toString(t))
-					// opt.s.WriteString(") ")
-					// opt.s.WriteString(value.Name)
-					// opt.s.WriteString("\n")
-					opt.WriteStrings(space, prefix, "(", opt.toString(t), ") ", value.Name, "\n")
-					// fmt.Fprintf(s, "%s%s(%s) %s\n", space, prefix, toString(t), value.Name)
-
+					opt.WriteStrings(space, name, connector, "(", opt.typString(t), ") ", value.Name, "\n")
 				}
 			}
 		}
 	default:
 		typ := fmt.Sprintf("%v", t)
-		opt.WriteStrings(space, prefix, " don't know how to print ", typ, "\n")
-		// fmt.Fprintf(s, "%s%s don't know how to print %v\n", space, prefix, t)
+		opt.WriteStrings(space, name, connector, "don't know how to print ", typ, "\n")
 	}
 	return true
 }
