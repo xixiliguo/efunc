@@ -129,6 +129,7 @@ type FuncGraph struct {
 	stopper         chan os.Signal
 	objs            funcgraphObjects
 	opt             *dumpOption
+	spaceCache      [1024]byte
 }
 
 func NewFuncGraph(opt Option) (*FuncGraph, error) {
@@ -144,6 +145,9 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 		comms:          map[[16]uint8]bool{},
 		taskToEvents:   map[uint64]*FuncEvents{},
 		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
+	}
+	for i := 0; i < len(fg.spaceCache); i++ {
+		fg.spaceCache[i] = ' '
 	}
 
 	if err := fg.parseOption(opt); err != nil {
@@ -861,7 +865,7 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 		// buf.WriteString(stackLine)
 	}
 	fg.buf.WriteString("\n")
-	fg.output.WriteString(fg.buf.String())
+	fg.output.Write(fg.buf.Bytes())
 
 	for _, e := range *events {
 		if e.Buf != nil {
@@ -879,10 +883,14 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 	fg.buf.WriteString(" ---   -------- | --------------\n")
 	events := *es
 	prevSeqId := uint64(0)
+
 	for i := 0; i < len(events); i++ {
 		e := &events[i]
 		if gap := e.SeqId - prevSeqId; gap > 1 {
-			fmt.Fprintf(fg.buf, "%*s\u203C ... missing %d records ...\n", e.Depth*2+18, "", gap)
+			fg.buf.Write(fg.spaceCache[:e.Depth*2+18])
+			fg.buf.WriteString("\u203C ... missing ")
+			fg.buf.WriteString(strconv.FormatUint(gap, 10))
+			fg.buf.WriteString(" records ...\n")
 		}
 		d := time.Duration(e.Duration)
 
@@ -892,16 +900,37 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 			funcInfo.Symbol = sym
 		}
 		sym := funcInfo.Symbol
-		mod := ""
-		if sym.Module != "" {
-			mod = "[" + sym.Module + "]"
-		}
 		prevSeqId = e.SeqId
 		if e.Type == uint8(EntryEvent) {
 			if i+1 < len(events) && events[i+1].Type == uint8(RetEvent) && events[i+1].Ip == e.Ip {
 				ret := &events[i+1]
 				d := time.Duration(ret.Duration)
-				fmt.Fprintf(fg.buf, "%3d) %10s | %*s\u2194 %s %s ", e.CpuId, d, e.Depth*2, "", sym.Name, mod)
+				id := strconv.FormatInt(int64(e.CpuId), 10)
+				if gap := 3 - len(id); gap > 0 {
+					fg.buf.Write(fg.spaceCache[:gap])
+				}
+				fg.buf.WriteString(id)
+				fg.buf.WriteString(") ")
+				ds := d.String()
+
+				l := len(ds)
+				if m := d.Microseconds(); m > 0 && m < 1000 {
+					l--
+				}
+				if gap := 10 - l; gap > 0 {
+					fg.buf.Write(fg.spaceCache[:gap])
+				}
+				fg.buf.WriteString(ds)
+				fg.buf.WriteString(" | ")
+				fg.buf.Write(fg.spaceCache[:e.Depth*2])
+				fg.buf.WriteString("\u2194 ")
+				fg.buf.WriteString(sym.Name)
+				fg.buf.WriteString(" ")
+				if sym.Module != "" {
+					fg.buf.WriteString("[")
+					fg.buf.WriteString(sym.Module)
+					fg.buf.WriteString("]")
+				}
 				fg.ShowFuncPara(e)
 				fg.buf.WriteByte(' ')
 				fg.ShowFuncRet(ret)
@@ -913,24 +942,30 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 						sz = 1024
 					}
 					fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(9+e.Depth))
-					// opt := dumpOption{
-					// 	data:    e.Buf[off : off+sz],
-					// 	isStr:   t.isStr,
-					// 	level:   int(9 + e.Depth),
-					// 	offset:  0,
-					// 	bitOff:  0,
-					// 	bitSize: 0,
-					// 	ksyms:   &fg.ksyms,
-					// 	s:       s,
-					// }
-
 					fg.opt.dumpDataByBTF(t.Name, t.Typ)
 					fg.buf.WriteString(fg.opt.String())
 				}
 				i++
 				prevSeqId = ret.SeqId
 			} else {
-				fmt.Fprintf(fg.buf, "%3d) %10s | %*s\u2192 %s %s ", e.CpuId, "", e.Depth*2, "", sym.Name, mod)
+
+				id := strconv.FormatInt(int64(e.CpuId), 10)
+				if gap := 3 - len(id); gap > 0 {
+					fg.buf.Write(fg.spaceCache[:gap])
+				}
+				fg.buf.WriteString(id)
+				fg.buf.WriteString(") ")
+				fg.buf.Write(fg.spaceCache[:10])
+				fg.buf.WriteString(" | ")
+				fg.buf.Write(fg.spaceCache[:e.Depth*2])
+				fg.buf.WriteString("\u2192 ")
+				fg.buf.WriteString(sym.Name)
+				fg.buf.WriteString(" ")
+				if sym.Module != "" {
+					fg.buf.WriteString("[")
+					fg.buf.WriteString(sym.Module)
+					fg.buf.WriteString("]")
+				}
 				fg.ShowFuncPara(e)
 				fg.buf.WriteByte('\n')
 				for idx, t := range funcInfo.trace {
@@ -940,22 +975,36 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 						sz = 1024
 					}
 					fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(9+e.Depth))
-					// opt := dumpOption{
-					// 	data:    e.Buf[off : off+sz],
-					// 	isStr:   t.isStr,
-					// 	level:   int(9 + e.Depth),
-					// 	offset:  0,
-					// 	bitOff:  0,
-					// 	bitSize: 0,
-					// 	ksyms:   &fg.ksyms,
-					// 	s:       s,
-					// }
 					fg.opt.dumpDataByBTF(t.Name, t.Typ)
 					fg.buf.WriteString(fg.opt.String())
 				}
 			}
 		} else {
-			fmt.Fprintf(fg.buf, "%3d) %10s | %*s\u2190 %s %s ", e.CpuId, d, e.Depth*2, "", sym.Name, mod)
+			id := strconv.FormatInt(int64(e.CpuId), 10)
+			if gap := 3 - len(id); gap > 0 {
+				fg.buf.Write(fg.spaceCache[:gap])
+			}
+			fg.buf.WriteString(id)
+			fg.buf.WriteString(") ")
+			ds := d.String()
+			l := len(ds)
+			if m := d.Microseconds(); m > 0 && m < 1000 {
+				l--
+			}
+			if gap := 10 - l; gap > 0 {
+				fg.buf.Write(fg.spaceCache[:gap])
+			}
+			fg.buf.WriteString(ds)
+			fg.buf.WriteString(" | ")
+			fg.buf.Write(fg.spaceCache[:e.Depth*2])
+			fg.buf.WriteString("\u2190 ")
+			fg.buf.WriteString(sym.Name)
+			fg.buf.WriteString(" ")
+			if sym.Module != "" {
+				fg.buf.WriteString("[")
+				fg.buf.WriteString(sym.Module)
+				fg.buf.WriteString("]")
+			}
 			fg.ShowFuncRet(e)
 			fg.buf.WriteByte('\n')
 		}
