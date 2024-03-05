@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -123,7 +124,7 @@ type FuncGraph struct {
 	taskToEvents    map[uint64]*FuncEvents
 	eventsPool      sync.Pool
 	dataPool        sync.Pool
-	s               *strings.Builder
+	buf             *bytes.Buffer
 	output          *os.File
 	stopper         chan os.Signal
 	objs            funcgraphObjects
@@ -142,7 +143,7 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 		pids:           map[uint32]bool{},
 		comms:          map[[16]uint8]bool{},
 		taskToEvents:   map[uint64]*FuncEvents{},
-		s:              &strings.Builder{},
+		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
 	}
 
 	if err := fg.parseOption(opt); err != nil {
@@ -720,7 +721,7 @@ func (fg *FuncGraph) run() error {
 			// 	fmt.Printf("parsing ringbuf event: %s\n", err)
 			// 	os.Exit(1)
 			// }
-			fg.handleCallEvent(callEvent, fg.s)
+			fg.handleCallEvent(callEvent)
 		case StartEvent:
 			startEvent := (*funcgraphStartEvent)(unsafe.Pointer(unsafe.SliceData(rec.RawSample)))
 			// if err := binary.Read(bytes.NewBuffer(rec.RawSample), binary.LittleEndian, &startEvent); err != nil {
@@ -797,10 +798,9 @@ func (fg *FuncGraph) run() error {
 	}
 }
 
-func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent, s *strings.Builder) {
+func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 
-	s.Reset()
-	s.Grow(4096)
+	fg.buf.Reset()
 
 	var t [1024]byte
 	b := t[:0]
@@ -811,33 +811,33 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent, s *strings.Build
 	// fmt.Fprintf(s, "TIME: %s -> %s PID/TID: %d/%d (%s %s) \n", start, end, event.Pid, event.Tid,
 	// 	unix.ByteSliceToString(event.GroupComm[:]), unix.ByteSliceToString(event.Comm[:]))
 
-	s.WriteString("TIME: ")
+	fg.buf.WriteString("TIME: ")
 	b = t[:0]
 	b = time.Unix(int64(fg.bootTime), int64(event.StartTime)).AppendFormat(b, "15:04:05.000000")
-	s.Write(b)
+	fg.buf.Write(b)
 	// s.WriteString(start)
-	s.WriteString(" -> ")
+	fg.buf.WriteString(" -> ")
 	b = t[:0]
 	b = time.Unix(int64(fg.bootTime), int64(event.EndTime)).AppendFormat(b, "15:04:05.000000")
-	s.Write(b)
-	s.WriteString(" PID/TID: ")
+	fg.buf.Write(b)
+	fg.buf.WriteString(" PID/TID: ")
 	b = t[:0]
 	b = strconv.AppendUint(b, uint64(event.Pid), 10)
-	s.Write(b)
+	fg.buf.Write(b)
 	// s.WriteString(strconv.FormatUint(uint64(event.Pid), 10))
-	s.WriteString("/")
+	fg.buf.WriteString("/")
 	b = t[:0]
 	b = strconv.AppendUint(b, uint64(event.Tid), 10)
-	s.Write(b)
+	fg.buf.Write(b)
 	// s.WriteString(strconv.FormatUint(uint64(event.Tid), 10))
-	s.WriteString(" (")
-	s.WriteString(ByteSliceToString(event.GroupComm[:]))
-	s.WriteString(" ")
-	s.WriteString(ByteSliceToString(event.Comm[:]))
-	s.WriteString(") \n")
+	fg.buf.WriteString(" (")
+	fg.buf.WriteString(ByteSliceToString(event.GroupComm[:]))
+	fg.buf.WriteString(" ")
+	fg.buf.WriteString(ByteSliceToString(event.Comm[:]))
+	fg.buf.WriteString(") \n")
 
 	events := fg.taskToEvents[event.Task]
-	fg.handleFuncEvent(events, s)
+	fg.handleFuncEvent(events)
 	for _, addr := range event.Kstack {
 		if addr == 0 {
 			break
@@ -851,17 +851,17 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent, s *strings.Build
 		b = t[:0]
 		b = strconv.AppendUint(b, addr-sym.Addr, 16)
 		// off := strconv.FormatUint(addr-sym.Addr, 16)
-		s.WriteString(sym.Name)
-		s.WriteString("+0x")
-		s.Write(b)
-		s.WriteString(" ")
-		s.WriteString(mod)
-		s.WriteString("\n")
+		fg.buf.WriteString(sym.Name)
+		fg.buf.WriteString("+0x")
+		fg.buf.Write(b)
+		fg.buf.WriteString(" ")
+		fg.buf.WriteString(mod)
+		fg.buf.WriteString("\n")
 		// fmt.Fprintf(s, "%s+%#x %s\n", sym.Name, addr-sym.Addr, mod)
 		// buf.WriteString(stackLine)
 	}
-	s.WriteString("\n")
-	fg.output.WriteString(s.String())
+	fg.buf.WriteString("\n")
+	fg.output.WriteString(fg.buf.String())
 
 	for _, e := range *events {
 		if e.Buf != nil {
@@ -874,15 +874,15 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent, s *strings.Build
 	delete(fg.taskToEvents, event.Task)
 }
 
-func (fg *FuncGraph) handleFuncEvent(es *FuncEvents, s *strings.Builder) {
-	s.WriteString(" CPU   DURATION | FUNCTION GRAPH\n")
-	s.WriteString(" ---   -------- | --------------\n")
+func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
+	fg.buf.WriteString(" CPU   DURATION | FUNCTION GRAPH\n")
+	fg.buf.WriteString(" ---   -------- | --------------\n")
 	events := *es
 	prevSeqId := uint64(0)
 	for i := 0; i < len(events); i++ {
 		e := &events[i]
 		if gap := e.SeqId - prevSeqId; gap > 1 {
-			fmt.Fprintf(s, "%*s\u203C ... missing %d records ...\n", e.Depth*2+18, "", gap)
+			fmt.Fprintf(fg.buf, "%*s\u203C ... missing %d records ...\n", e.Depth*2+18, "", gap)
 		}
 		d := time.Duration(e.Duration)
 
@@ -901,11 +901,11 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents, s *strings.Builder) {
 			if i+1 < len(events) && events[i+1].Type == uint8(RetEvent) && events[i+1].Ip == e.Ip {
 				ret := &events[i+1]
 				d := time.Duration(ret.Duration)
-				fmt.Fprintf(s, "%3d) %10s | %*s\u2194 %s %s ", e.CpuId, d, e.Depth*2, "", sym.Name, mod)
-				fg.ShowFuncPara(e, s)
-				s.WriteByte(' ')
-				fg.ShowFuncRet(ret, s)
-				s.WriteByte('\n')
+				fmt.Fprintf(fg.buf, "%3d) %10s | %*s\u2194 %s %s ", e.CpuId, d, e.Depth*2, "", sym.Name, mod)
+				fg.ShowFuncPara(e)
+				fg.buf.WriteByte(' ')
+				fg.ShowFuncRet(ret)
+				fg.buf.WriteByte('\n')
 				for idx, t := range funcInfo.trace {
 					off := idx * 1024
 					sz := t.Size
@@ -925,14 +925,14 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents, s *strings.Builder) {
 					// }
 
 					fg.opt.dumpDataByBTF(t.Name, t.Typ)
-					s.WriteString(fg.opt.String())
+					fg.buf.WriteString(fg.opt.String())
 				}
 				i++
 				prevSeqId = ret.SeqId
 			} else {
-				fmt.Fprintf(s, "%3d) %10s | %*s\u2192 %s %s ", e.CpuId, "", e.Depth*2, "", sym.Name, mod)
-				fg.ShowFuncPara(e, s)
-				s.WriteByte('\n')
+				fmt.Fprintf(fg.buf, "%3d) %10s | %*s\u2192 %s %s ", e.CpuId, "", e.Depth*2, "", sym.Name, mod)
+				fg.ShowFuncPara(e)
+				fg.buf.WriteByte('\n')
 				for idx, t := range funcInfo.trace {
 					off := idx * 1024
 					sz := t.Size
@@ -951,22 +951,22 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents, s *strings.Builder) {
 					// 	s:       s,
 					// }
 					fg.opt.dumpDataByBTF(t.Name, t.Typ)
-					s.WriteString(fg.opt.String())
+					fg.buf.WriteString(fg.opt.String())
 				}
 			}
 		} else {
-			fmt.Fprintf(s, "%3d) %10s | %*s\u2190 %s %s ", e.CpuId, d, e.Depth*2, "", sym.Name, mod)
-			fg.ShowFuncRet(e, s)
-			s.WriteByte('\n')
+			fmt.Fprintf(fg.buf, "%3d) %10s | %*s\u2190 %s %s ", e.CpuId, d, e.Depth*2, "", sym.Name, mod)
+			fg.ShowFuncRet(e)
+			fg.buf.WriteByte('\n')
 		}
 	}
-	s.WriteByte('\n')
+	fg.buf.WriteByte('\n')
 }
 
-func (fg *FuncGraph) ShowFuncPara(e *FuncEvent, s *strings.Builder) {
+func (fg *FuncGraph) ShowFuncPara(e *FuncEvent) {
 
 	if e.Id == 0 {
-		fmt.Fprintf(s, "%#x %#x %#x", e.Para[0], e.Para[1], e.Para[2])
+		fmt.Fprintf(fg.buf, "%#x %#x %#x", e.Para[0], e.Para[1], e.Para[2])
 		return
 	}
 
@@ -980,16 +980,16 @@ func (fg *FuncGraph) ShowFuncPara(e *FuncEvent, s *strings.Builder) {
 			break
 		}
 		if i != 0 {
-			s.WriteByte(' ')
+			fg.buf.WriteByte(' ')
 		}
 		typ := btf.UnderlyingType(p.Type)
 		switch t := typ.(type) {
 		case *btf.Pointer:
-			s.WriteString(p.Name)
-			s.WriteString("=0x")
+			fg.buf.WriteString(p.Name)
+			fg.buf.WriteString("=0x")
 			b := n[:0]
 			b = strconv.AppendUint(b, e.Para[i], 16)
-			s.Write(b)
+			fg.buf.Write(b)
 			// fmt.Fprintf(s, "%s=%#x", p.Name, e.Para[i])
 		case *btf.Int:
 			b := n[:0]
@@ -1020,27 +1020,27 @@ func (fg *FuncGraph) ShowFuncPara(e *FuncEvent, s *strings.Builder) {
 				b = strconv.AppendUint(b, e.Para[i], 10)
 				// fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i])
 			}
-			s.WriteString(p.Name)
-			s.WriteString("=")
-			s.Write(b)
+			fg.buf.WriteString(p.Name)
+			fg.buf.WriteString("=")
+			fg.buf.Write(b)
 		default:
-			s.WriteString(p.Name)
-			s.WriteString("=")
+			fg.buf.WriteString(p.Name)
+			fg.buf.WriteString("=")
 			b := n[:0]
 			b = strconv.AppendUint(b, e.Para[i], 10)
-			s.Write(b)
+			fg.buf.Write(b)
 			// fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i])
 		}
 	}
 
 }
 
-func (fg *FuncGraph) ShowFuncRet(e *FuncEvent, s *strings.Builder) {
+func (fg *FuncGraph) ShowFuncRet(e *FuncEvent) {
 	if e.Id == 0 {
-		fmt.Fprintf(s, "%#x", e.Ret)
+		fmt.Fprintf(fg.buf, "%#x", e.Ret)
 		return
 	}
-	s.WriteString("ret=")
+	fg.buf.WriteString("ret=")
 	funcInfo := fg.idToFuncs[btf.TypeID(e.Id)]
 	bFunc := funcInfo.btfinfo
 	bFuncProto := bFunc.Type.(*btf.FuncProto)
@@ -1049,26 +1049,26 @@ func (fg *FuncGraph) ShowFuncRet(e *FuncEvent, s *strings.Builder) {
 	case *btf.Int:
 		switch {
 		case t.Encoding == btf.Signed && t.Size == 4:
-			fmt.Fprintf(s, "%v", int32(e.Ret))
+			fmt.Fprintf(fg.buf, "%v", int32(e.Ret))
 		case t.Encoding == btf.Signed && t.Size == 8:
-			fmt.Fprintf(s, "%v", int64(e.Ret))
+			fmt.Fprintf(fg.buf, "%v", int64(e.Ret))
 		case t.Encoding == btf.Unsigned && t.Size == 4:
-			fmt.Fprintf(s, "%v", uint32(e.Ret))
+			fmt.Fprintf(fg.buf, "%v", uint32(e.Ret))
 		case t.Encoding == btf.Unsigned && t.Size == 8:
-			fmt.Fprintf(s, "%v", uint64(e.Ret))
+			fmt.Fprintf(fg.buf, "%v", uint64(e.Ret))
 		case t.Encoding == btf.Char:
-			fmt.Fprintf(s, "%v", byte(e.Ret))
+			fmt.Fprintf(fg.buf, "%v", byte(e.Ret))
 		case t.Encoding == btf.Bool:
-			fmt.Fprintf(s, "%v", e.Ret != 0)
+			fmt.Fprintf(fg.buf, "%v", e.Ret != 0)
 		default:
-			fmt.Fprintf(s, "%d", e.Ret)
+			fmt.Fprintf(fg.buf, "%d", e.Ret)
 		}
 	case *btf.Pointer:
-		fmt.Fprintf(s, "%#x", e.Ret)
+		fmt.Fprintf(fg.buf, "%#x", e.Ret)
 	case *btf.Void:
-		s.WriteString("void")
+		fg.buf.WriteString("void")
 	default:
-		fmt.Fprintf(s, "%v", e.Ret)
+		fmt.Fprintf(fg.buf, "%v", e.Ret)
 	}
 
 }
