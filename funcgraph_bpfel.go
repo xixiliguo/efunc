@@ -86,7 +86,6 @@ type funcgraphTraceData struct {
 	FieldCnt uint8
 	_        [1]byte
 	Offsets  [20]uint32
-	BitSize  uint32
 	Size     uint16
 	_        [2]byte
 }

@@ -45,6 +45,6 @@ func BenchmarkDumpDataByBTF(b *testing.B) {
 
 	for n := 0; n < b.N; n++ {
 		opt.Reset(rawData, false, 0)
-		opt.dumpDataByBTF(name, typ)
+		opt.dumpDataByBTF(name, typ, 0, 0, 0)
 	}
 }

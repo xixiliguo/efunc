@@ -60,7 +60,6 @@ struct trace_data {
 	bool is_str;
 	u8 field_cnt;
 	u32 offsets[MAX_TRACE_FIELD_LEN];
-	u32 bit_size;
 	u16 size;
 };
 

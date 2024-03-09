@@ -594,7 +594,6 @@ func (fg *FuncGraph) load() error {
 				IsStr:    t.isStr,
 				FieldCnt: uint8(len(t.Offsets)),
 				Offsets:  [20]uint32{},
-				BitSize:  t.BitSize,
 				Size:     uint16(t.Size),
 			}
 			copy(ft.Offsets[:], t.Offsets)
@@ -942,7 +941,7 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 						sz = 1024
 					}
 					fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(9+e.Depth))
-					fg.opt.dumpDataByBTF(t.Name, t.Typ)
+					fg.opt.dumpDataByBTF(t.Name, t.Typ, 0, int(t.BitOff), int(t.BitSize))
 					fg.buf.WriteString(fg.opt.String())
 				}
 				i++
@@ -975,7 +974,7 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 						sz = 1024
 					}
 					fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(9+e.Depth))
-					fg.opt.dumpDataByBTF(t.Name, t.Typ)
+					fg.opt.dumpDataByBTF(t.Name, t.Typ, 0, int(t.BitOff), int(t.BitSize))
 					fg.buf.WriteString(fg.opt.String())
 				}
 			}

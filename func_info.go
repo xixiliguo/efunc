@@ -54,8 +54,9 @@ type TraceData struct {
 	Typ     btf.Type
 	Para    int
 	Offsets []uint32
-	BitSize uint32
 	Size    int
+	BitOff  uint32
+	BitSize uint32
 }
 
 func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
@@ -158,7 +159,8 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) {
 			}
 			currStructType = typ
 			offset += off
-			t.BitSize = bitOff<<16 + bitSize
+			t.BitOff = bitOff
+			t.BitSize = bitSize
 		}
 	}
 	t.Typ = currStructType
