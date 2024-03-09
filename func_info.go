@@ -231,7 +231,10 @@ func typToString(typ btf.Type) string {
 		}
 		re = t.Name
 	case *btf.Struct:
-		re = "struct " + t.Name
+		re = "struct"
+		if t.Name != "" {
+			re += " " + t.Name
+		}
 	case *btf.Void:
 		re = "void"
 	case *btf.FuncProto:
@@ -258,9 +261,15 @@ func typToString(typ btf.Type) string {
 	case *btf.Fwd:
 		re = fmt.Sprintf("%s %s", t.Kind, t.Name)
 	case *btf.Union:
-		re = "union " + t.Name
+		re = "union"
+		if t.Name != "" {
+			re += " " + t.Name
+		}
 	case *btf.Enum:
-		re = "enum " + t.Name
+		re = "enum"
+		if t.Name != "" {
+			re += " " + t.Name
+		}
 	default:
 		re = fmt.Sprintf("don't know how to toString Type %v", typ)
 	}
