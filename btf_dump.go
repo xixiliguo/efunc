@@ -162,7 +162,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		}
 		opt.WriteStrings(space, "}\n")
 	case *btf.Int:
-		msg := make([]byte, 0, 32)
+		msg := make([]byte, 0, 16)
 		if bitSize != 0 {
 			var num uint64
 			for i := int(t.Size - 1); i >= 0; i-- {
@@ -172,18 +172,15 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			right := 64 - bitSize
 			num = (num << uint64(left)) >> uint64(right)
 			if t.Encoding == btf.Signed {
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendInt(msg, int64(num), 16)
+				msg = strconv.AppendInt(msg, int64(num), 10)
 			} else {
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendUint(msg, uint64(num), 16)
+				msg = strconv.AppendUint(msg, uint64(num), 10)
 			}
 		} else {
 			switch {
 			case t.Encoding == btf.Signed && t.Size == 1:
 				d := *(*int8)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendInt(msg, int64(d), 16)
+				msg = strconv.AppendInt(msg, int64(d), 10)
 				if data[offset] >= 0x20 && data[offset] <= 0x7e {
 					msg = append(msg, " /* "...)
 					msg = append(msg, data[offset])
@@ -191,20 +188,16 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 				}
 			case t.Encoding == btf.Signed && t.Size == 2:
 				d := *(*int16)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendInt(msg, int64(d), 16)
+				msg = strconv.AppendInt(msg, int64(d), 10)
 			case t.Encoding == btf.Signed && t.Size == 4:
 				d := *(*int32)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendInt(msg, int64(d), 16)
+				msg = strconv.AppendInt(msg, int64(d), 10)
 			case t.Encoding == btf.Signed && t.Size == 8:
 				d := *(*int64)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendInt(msg, int64(d), 16)
+				msg = strconv.AppendInt(msg, int64(d), 10)
 			case t.Encoding == btf.Unsigned && t.Size == 1:
 				d := *(*uint8)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendUint(msg, uint64(d), 16)
+				msg = strconv.AppendUint(msg, uint64(d), 10)
 				if data[offset] >= 0x20 && data[offset] <= 0x7e {
 					msg = append(msg, " /* "...)
 					msg = append(msg, data[offset])
@@ -212,20 +205,16 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 				}
 			case t.Encoding == btf.Unsigned && t.Size == 2:
 				d := *(*uint16)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendUint(msg, uint64(d), 16)
+				msg = strconv.AppendUint(msg, uint64(d), 10)
 			case t.Encoding == btf.Unsigned && t.Size == 4:
 				d := *(*uint32)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendUint(msg, uint64(d), 16)
+				msg = strconv.AppendUint(msg, uint64(d), 10)
 			case t.Encoding == btf.Unsigned && t.Size == 8:
 				d := *(*uint64)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendUint(msg, uint64(d), 16)
+				msg = strconv.AppendUint(msg, uint64(d), 10)
 			case t.Encoding == btf.Char:
 				d := *(*uint8)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
-				msg = append(msg, "0x"...)
-				msg = strconv.AppendUint(msg, uint64(d), 16)
+				msg = strconv.AppendUint(msg, uint64(d), 10)
 				if data[offset] >= 0x20 && data[offset] <= 0x7e {
 					msg = append(msg, " /* "...)
 					msg = append(msg, data[offset])
