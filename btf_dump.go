@@ -14,6 +14,7 @@ type dumpOption struct {
 	data           []byte
 	isStr          bool
 	level          int
+	showZero       bool
 	ksyms          *KSymCache
 	buf            *bytes.Buffer
 	spaceCache     [1024]byte
@@ -95,6 +96,15 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			opt.WriteStrings(space, "/* only show first ", cnt, " bytes */\n")
 			return false
 		}
+		i := 0
+		for ; i < sz; i++ {
+			if data[offset+i] != 0 {
+				break
+			}
+		}
+		if !opt.showZero && i == sz {
+			return true
+		}
 	}
 
 	connector := ""
@@ -171,6 +181,9 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			left := 64 - bitOff - bitSize
 			right := 64 - bitSize
 			num = (num << uint64(left)) >> uint64(right)
+			if !opt.showZero && num == 0 {
+				return true
+			}
 			if t.Encoding == btf.Signed {
 				msg = strconv.AppendInt(msg, int64(num), 10)
 			} else {
