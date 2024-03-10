@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"maps"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -690,10 +688,6 @@ func (fg *FuncGraph) run() error {
 			fmt.Printf("closing ringbuf reader: %s\n", err)
 			os.Exit(1)
 		}
-	}()
-
-	go func() {
-		fmt.Println(http.ListenAndServe("0.0.0.0:6060", nil))
 	}()
 
 	fmt.Println("Waiting for events..")
