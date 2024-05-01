@@ -923,7 +923,7 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 				if sym.Module != "" {
 					fg.buf.WriteString("[")
 					fg.buf.WriteString(sym.Module)
-					fg.buf.WriteString("]")
+					fg.buf.WriteString("] ")
 				}
 				fg.ShowFuncPara(e)
 				fg.buf.WriteByte(' ')
@@ -959,7 +959,7 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 				if sym.Module != "" {
 					fg.buf.WriteString("[")
 					fg.buf.WriteString(sym.Module)
-					fg.buf.WriteString("]")
+					fg.buf.WriteString("] ")
 				}
 				fg.ShowFuncPara(e)
 				fg.buf.WriteByte('\n')
@@ -998,7 +998,7 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 			if sym.Module != "" {
 				fg.buf.WriteString("[")
 				fg.buf.WriteString(sym.Module)
-				fg.buf.WriteString("]")
+				fg.buf.WriteString("] ")
 			}
 			fg.ShowFuncRet(e)
 			fg.buf.WriteByte('\n')
