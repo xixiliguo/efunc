@@ -1123,6 +1123,9 @@ EXAMPLES:
 	./efunc info "ip_rcv"
 	./efunc info "ip_rcv(*skb, skb->len, skb->dev.name)"
 	./efunc trace -e ".ip_rcv(skb->len)" -a ":net/ipv4/*" -a "virtio_net:*"	
+
+ENVIRONMENT:
+	BTF_SHOW_ZERO		[default: 0] show field info even value is zero
 	`, cli.AppHelpTemplate)
 	app := &cli.App{
 		Usage:   "A eBPF-based trace tool like ftrace funcgraph",

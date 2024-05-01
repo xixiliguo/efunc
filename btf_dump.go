@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -27,10 +28,15 @@ func NewDumpOption() (*dumpOption, error) {
 	if err != nil {
 		return nil, err
 	}
+	isShow := false
+	if v := os.Getenv("BTF_SHOW_ZERO"); v == "1" {
+		isShow = true
+	}
 	d := dumpOption{
 		data:           nil,
 		isStr:          false,
 		level:          0,
+		showZero:       isShow,
 		ksyms:          &k,
 		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
 		typStringCache: make(map[btf.Type]string),
@@ -102,7 +108,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 				break
 			}
 		}
-		if !opt.showZero && i == sz {
+		if !opt.showZero && i == sz && offset != 0 {
 			return true
 		}
 	}
@@ -164,7 +170,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		opt.WriteStrings(space, name, connector, "(", opt.typString(t.Type), "[", cnt, ")) {\n")
 		for i := 0; i < int(t.Nelems); i++ {
 			opt.level++
-			result := opt.dumpDataByBTF("", t.Type, offset+i*sz, bitOff, bitSize)
+			result := opt.dumpDataByBTF(strconv.Itoa(i), t.Type, offset+i*sz, bitOff, bitSize)
 			opt.level--
 			if !result {
 				return false
