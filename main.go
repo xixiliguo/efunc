@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1285,16 +1286,16 @@ EXAMPLES:
 					},
 				},
 				Action: func(ctx *cli.Context) error {
-
+					exprFmt, _ := regexp.Compile(`.*\(.*\)`)
 					entryFuncs := []string{}
 					entryFuncExprs := []*FuncExpr{}
 					entryFuncsOfDwarf := map[Symbol]struct{}{}
 					for _, e := range ctx.StringSlice("entry") {
-						if e[0] == '.' {
-							if fe, err := ParseFuncWithPara(e[1:]); err == nil {
+						if exprFmt.MatchString(e) {
+							if fe, err := ParseFuncWithPara(e); err == nil {
 								entryFuncExprs = append(entryFuncExprs, fe)
 							} else {
-								return fmt.Errorf("parsing %s\n%w", e[1:], err)
+								return fmt.Errorf("parsing %s\n%w", e, err)
 							}
 						} else if e[0] == ':' {
 							maps.Copy(entryFuncsOfDwarf, funcsFromFile(e[1:]))
@@ -1307,11 +1308,11 @@ EXAMPLES:
 					allowFuncExprs := []*FuncExpr{}
 					allowFuncsOfDwarf := map[Symbol]struct{}{}
 					for _, a := range ctx.StringSlice("allow") {
-						if a[0] == '.' {
-							if fe, err := ParseFuncWithPara(a[1:]); err == nil {
+						if exprFmt.MatchString(a) {
+							if fe, err := ParseFuncWithPara(a); err == nil {
 								allowFuncExprs = append(allowFuncExprs, fe)
 							} else {
-								return fmt.Errorf("parsing %s\n%w", a[1:], err)
+								return fmt.Errorf("parsing %s\n%w", a, err)
 							}
 						} else if a[0] == ':' {
 							maps.Copy(allowFuncsOfDwarf, funcsFromFile(a[1:]))
