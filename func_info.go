@@ -43,13 +43,15 @@ type Value struct {
 type FuncInfo struct {
 	isEntry bool
 	Symbol
-	id      btf.TypeID
-	btfinfo *btf.Func
-	trace   []TraceData
+	id       btf.TypeID
+	btfinfo  *btf.Func
+	trace    []*TraceData
+	retTrace []*TraceData
 }
 
 type TraceData struct {
 	Name    string
+	onEntry bool
 	isStr   bool
 	Typ     btf.Type
 	Para    int
@@ -64,16 +66,27 @@ func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 	t := &TraceData{}
 	var btfData btf.Type
 	proto := fn.Type.(*btf.FuncProto)
-	for idx, para := range proto.Params {
-		if dataExpr.First == para.Name {
-			t.Name += para.Name
-			t.Para = idx
-			t.Size = 8
-			t.Typ = para.Type
-			btfData = para.Type
-			break
+
+	if dataExpr.First != "ret" {
+		for idx, para := range proto.Params {
+			if dataExpr.First == para.Name {
+				t.Name = para.Name
+				t.onEntry = true
+				t.Para = idx
+				t.Size = 8
+				t.Typ = para.Type
+				btfData = para.Type
+				break
+			}
 		}
+	} else {
+		t.Name = "ret"
+		t.onEntry = false
+		t.Size = 8
+		t.Typ = proto.Return
+		btfData = proto.Return
 	}
+
 	if btfData != nil {
 		if dataExpr.Dereference {
 			dataExpr.Fields = append(dataExpr.Fields, Field{

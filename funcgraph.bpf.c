@@ -70,6 +70,8 @@ struct func {
 	u8 name[MAX_FUNC_NAME_LEN];
 	u8 trace_cnt;
 	struct trace_data trace[MAX_TRACES];
+	u8 ret_trace_cnt;
+	struct trace_data ret_trace[MAX_TRACES];
 };
 
 struct {
@@ -127,6 +129,8 @@ struct func_ret_event {
 	u64 time;
 	u64 duration;
 	u64 ret;
+	bool have_data;
+	u8 buf[0];
 };
 
 struct call_event {
@@ -323,6 +327,46 @@ static __always_inline void extract_trace_data(struct func_entry_event *e, struc
 				}
 			}
 		}
+	}
+}
+
+static __always_inline void extract_ret_trace_data(struct func_ret_event *r, struct func *fn) {
+
+	for (int i=0; i < fn->ret_trace_cnt && i < MAX_TRACES; i++) {
+		u16 off = i * MAX_TRACE_DATA;
+		struct trace_data t = fn->ret_trace[i];
+		if (t.size == 0) {
+			break;
+		}
+		u64 prev_data = 0;
+		u64 data = r->ret;
+		bpf_probe_read_kernel(&r->buf[off], 8, &data);
+		for (u8 idx=0; idx < t.field_cnt && idx < MAX_TRACE_FIELD_LEN; idx++) {
+			data += t.offsets[idx];
+			prev_data = data;
+			bpf_probe_read_kernel(&data, sizeof(data), (void *)data);
+		}
+		if (prev_data != 0) {
+			// if (off + MAX_TRACE_DATA >= MAX_TRACE_BUF) {
+			// 	break;
+			// }
+			// u8 *ptr = ;
+			// if (ptr > &e->buf[MAX_TRACE_BUF]) {
+			// 	continue;
+			// }
+			u16 sz = t.size;
+			if (sz > MAX_TRACE_DATA) {
+				sz = MAX_TRACE_DATA;
+			}
+			// if (verbose) {
+			// 	bpf_printk("start: %d size: %d addr: %llx", start, t.size, prev_data);
+			// }
+			bpf_probe_read_kernel(&r->buf[off], sz, (void *)prev_data);
+			if (t.is_str) {
+				bpf_probe_read_kernel_str(&r->buf[off], MAX_TRACE_DATA, (void *)data);
+			}
+		}
+		
 	}
 }
 
@@ -530,23 +574,87 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
 	}
 
 
-	struct func_ret_event *ret_info;
-	ret_info = bpf_ringbuf_reserve(&events, sizeof(struct func_ret_event), 0);
-	if (!ret_info) {
-		update_event_stat(RET_EVENT_DROP);
+
+	// if (fn->trace_cnt == 0) {
+	// 	struct func_entry_event *entry_info;
+	// 	entry_info = bpf_ringbuf_reserve(&events, sizeof(struct func_entry_event), 0);
+	// 	if (!entry_info) {
+	// 		update_event_stat(ENTRY_EVENT_DROP);
+	// 	} else {
+	// 		update_event_stat(ENTRY_EVENT_SUCCESS);
+	// 		entry_info->type = ENTRY_EVENT;
+	// 		entry_info->task = task;
+	// 		entry_info->cpu_id = bpf_get_smp_processor_id();
+	// 		entry_info->depth = d;
+	// 		entry_info->seq_id = e->next_seq_id;
+	// 		entry_info->ip = ip;
+	// 		entry_info->id = fn->id;
+	// 		entry_info->time = bpf_ktime_get_ns();
+	// 		extract_func_paras(entry_info, ctx);
+	// 		bpf_ringbuf_submit(entry_info, 0);
+	// 	}
+	// } else {
+	// 	struct func_entry_event *entry_info;
+	// 	entry_info = bpf_ringbuf_reserve(&events, sizeof(struct func_entry_event) + MAX_TRACE_BUF, 0);
+	// 	if (!entry_info) {
+	// 		update_event_stat(ENTRY_EVENT_DROP);
+	// 	} else {
+	// 		update_event_stat(ENTRY_EVENT_SUCCESS);
+	// 		entry_info->type = ENTRY_EVENT;
+	// 		entry_info->task = task;
+	// 		entry_info->cpu_id = bpf_get_smp_processor_id();
+	// 		entry_info->depth = d;
+	// 		entry_info->seq_id = e->next_seq_id;
+	// 		entry_info->ip = ip;
+	// 		entry_info->id = fn->id;
+	// 		entry_info->time = bpf_ktime_get_ns();
+	// 		extract_func_paras(entry_info, ctx);
+	// 		entry_info->have_data = true;
+	// 		extract_trace_data(entry_info, fn);
+	// 		bpf_ringbuf_submit(entry_info, 0);
+	// 	}
+	// }
+
+	if (fn->ret_trace_cnt == 0) {
+		struct func_ret_event *ret_info;
+		ret_info = bpf_ringbuf_reserve(&events, sizeof(struct func_ret_event), 0);
+		if (!ret_info) {
+			update_event_stat(RET_EVENT_DROP);
+		} else {
+			update_event_stat(RET_EVENT_SUCCESS);
+			ret_info->type = RET_EVENT;
+			ret_info->task = task;
+			ret_info->cpu_id = bpf_get_smp_processor_id();
+			ret_info->depth = d;
+			ret_info->seq_id = e->next_seq_id;
+			ret_info->ip = ip;
+			ret_info->id = fn->id;
+			ret_info->time = bpf_ktime_get_ns();
+			ret_info->duration = ret_info->time - e->durations[d];
+			ret_info->ret = PT_REGS_RC(ctx);
+			bpf_ringbuf_submit(ret_info, 0);
+		}
 	} else {
-		update_event_stat(RET_EVENT_SUCCESS);
-		ret_info->type = RET_EVENT;
-		ret_info->task = task;
-		ret_info->cpu_id = bpf_get_smp_processor_id();
-		ret_info->depth = d;
-		ret_info->seq_id = e->next_seq_id;
-		ret_info->ip = ip;
-		ret_info->id = fn->id;
-		ret_info->time = bpf_ktime_get_ns();
-		ret_info->duration = ret_info->time - e->durations[d];
-		ret_info->ret = PT_REGS_RC(ctx);
-		bpf_ringbuf_submit(ret_info, 0);
+		struct func_ret_event *ret_info;
+		ret_info = bpf_ringbuf_reserve(&events, sizeof(struct func_ret_event) + MAX_TRACE_BUF, 0);
+		if (!ret_info) {
+			update_event_stat(RET_EVENT_DROP);
+		} else {
+			update_event_stat(RET_EVENT_SUCCESS);
+			ret_info->type = RET_EVENT;
+			ret_info->task = task;
+			ret_info->cpu_id = bpf_get_smp_processor_id();
+			ret_info->depth = d;
+			ret_info->seq_id = e->next_seq_id;
+			ret_info->ip = ip;
+			ret_info->id = fn->id;
+			ret_info->time = bpf_ktime_get_ns();
+			ret_info->duration = ret_info->time - e->durations[d];
+			ret_info->ret = PT_REGS_RC(ctx);
+			ret_info->have_data = true;
+			extract_ret_trace_data(ret_info, fn);
+			bpf_ringbuf_submit(ret_info, 0);
+		}
 	}
 
 	e->durations[d] = bpf_ktime_get_ns() - e->durations[d];

@@ -277,6 +277,8 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 				}
 			}
 		}
+	case *btf.Void:
+		opt.WriteStrings(space, name, connector, "void", "\n")
 	default:
 		typ := fmt.Sprintf("%v", t)
 		opt.WriteStrings(space, name, connector, "don't know how to print ", typ, "\n")

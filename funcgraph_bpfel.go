@@ -38,6 +38,9 @@ type funcgraphFunc struct {
 	TraceCnt    uint8
 	_           [2]byte
 	Trace       [5]funcgraphTraceData
+	RetTraceCnt uint8
+	_           [3]byte
+	RetTrace    [5]funcgraphTraceData
 }
 
 type funcgraphFuncEntryEvent struct {
@@ -72,6 +75,9 @@ type funcgraphFuncRetEvent struct {
 	Time     uint64
 	Duration uint64
 	Ret      uint64
+	HaveData bool
+	Buf      [0]uint8
+	_        [7]byte
 }
 
 type funcgraphStartEvent struct {

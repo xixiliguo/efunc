@@ -185,7 +185,11 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 			}
 			for _, data := range expr.Datas {
 				t := genTraceData(data, info)
-				fn.trace = append(fn.trace, *t)
+				if t.onEntry {
+					fn.trace = append(fn.trace, t)
+				} else {
+					fn.retTrace = append(fn.retTrace, t)
+				}
 			}
 			return fn, true
 		}
@@ -586,7 +590,7 @@ func (fg *FuncGraph) load() error {
 			IsMainEntry: fn.isEntry,
 			Name:        name,
 		}
-		f.TraceCnt = uint8(len(fn.trace))
+		// f.TraceCnt = uint8(len(fn.trace))
 		for i, t := range fn.trace {
 			ft := funcgraphTraceData{
 				Para:     uint8(t.Para),
@@ -597,6 +601,19 @@ func (fg *FuncGraph) load() error {
 			}
 			copy(ft.Offsets[:], t.Offsets)
 			f.Trace[i] = ft
+			f.TraceCnt++
+		}
+		for i, t := range fn.retTrace {
+			ft := funcgraphTraceData{
+				Para:     uint8(t.Para),
+				IsStr:    t.isStr,
+				FieldCnt: uint8(len(t.Offsets)),
+				Offsets:  [20]uint32{},
+				Size:     uint16(t.Size),
+			}
+			copy(ft.Offsets[:], t.Offsets)
+			f.RetTrace[i] = ft
+			f.RetTraceCnt++
 		}
 		err = fg.objs.funcgraphMaps.FuncInfo.Update(fn.Addr, f, ebpf.UpdateAny)
 		if err != nil {
@@ -786,6 +803,13 @@ func (fg *FuncGraph) run() error {
 				Duration: retEvent.Duration,
 				Ret:      retEvent.Ret,
 			}
+
+			if retEvent.HaveData {
+				empty := fg.dataPool.Get().(*[5120]uint8)
+				e.Buf = empty
+				copy(e.Buf[:], unsafe.Slice(unsafe.SliceData(retEvent.Buf[:]), 5120))
+			}
+
 			events := fg.taskToEvents[task]
 			events.Add(e)
 			fg.taskToEvents[task] = events
@@ -940,6 +964,19 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 					fg.buf.WriteString(fg.opt.String())
 					fg.buf.WriteString("\n")
 				}
+
+				for idx, t := range funcInfo.retTrace {
+					off := idx * 1024
+					sz := t.Size
+					if sz > 1024 {
+						sz = 1024
+					}
+					fg.opt.Reset(ret.Buf[off:off+sz], t.isStr, int(9+e.Depth))
+					fg.opt.dumpDataByBTF(t.Name, t.Typ, 0, int(t.BitOff), int(t.BitSize))
+					fg.buf.WriteString(fg.opt.String())
+					fg.buf.WriteString("\n")
+				}
+
 				i++
 				prevSeqId = ret.SeqId
 			} else {
@@ -1002,6 +1039,18 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 			}
 			fg.ShowFuncRet(e)
 			fg.buf.WriteByte('\n')
+			for idx, t := range funcInfo.retTrace {
+				off := idx * 1024
+				sz := t.Size
+				if sz > 1024 {
+					sz = 1024
+				}
+				fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(9+e.Depth))
+				fg.opt.dumpDataByBTF(t.Name, t.Typ, 0, int(t.BitOff), int(t.BitSize))
+				fg.buf.WriteString(fg.opt.String())
+				fg.buf.WriteString("\n")
+			}
+
 		}
 	}
 	fg.buf.WriteByte('\n')
