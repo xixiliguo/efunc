@@ -20,6 +20,7 @@ type FuncExpr struct {
 
 type DataExpr struct {
 	Dereference bool    `parser:"@DereferenceOperator?"`
+	Typ         string  `parser:"(LeftEdge Struct Whitespace @Ident Whitespace DereferenceOperator RightEdge)?"`
 	First       string  `parser:"@Ident"`
 	Fields      []Field `parser:"@@*"`
 	SohwString  bool    `parser:"@ShowString?"`
@@ -88,12 +89,53 @@ func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 	}
 
 	if btfData != nil {
-		if dataExpr.Dereference {
-			dataExpr.Fields = append(dataExpr.Fields, Field{
-				Name: "",
-			})
-		}
+
 		genTraceDataByField(dataExpr.Fields, 0, btfData, t)
+
+		if dataExpr.Typ != "" {
+			if _, ok := t.Typ.(*btf.Pointer); ok {
+				spec, err := loadbtfSpec("")
+				if err != nil {
+					fmt.Printf("loadbtfSpec: %s\n", err)
+					os.Exit(1)
+				}
+				structPtr := &btf.Struct{}
+				err = spec.TypeByName(dataExpr.Typ, &structPtr)
+				if err != nil {
+					fmt.Printf("TypeByName %s: %s\n", dataExpr.Typ, err)
+					os.Exit(1)
+				}
+
+				pointer := &btf.Pointer{
+					Target: structPtr,
+				}
+				t.Typ = pointer
+				t.Name = fmt.Sprintf("(struct %s *)%s", dataExpr.Typ, t.Name)
+
+			} else {
+				fmt.Printf("type cast only support pointer type: source type is %+v\n", t.Typ)
+				os.Exit(1)
+			}
+		}
+
+		if dataExpr.Dereference {
+			btfData := btf.UnderlyingType(t.Typ)
+			btfPointerData, ok := btfData.(*btf.Pointer)
+			if !ok {
+				fmt.Printf("%+v is not pointer type\n", btfData)
+				os.Exit(1)
+			}
+			t.Typ = btfPointerData.Target
+			t.Offsets = append(t.Offsets, 0)
+			if sz, err := btf.Sizeof(t.Typ); err == nil {
+				t.Size = sz
+			} else {
+				fmt.Printf("%+v cannot get size: %s\n", t.Typ, err)
+				os.Exit(1)
+			}
+			t.Name = "*" + t.Name
+		}
+
 	} else {
 		fmt.Printf("%s is not parameter of %s\n", dataExpr.First, fn)
 		os.Exit(1)
@@ -161,21 +203,21 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) {
 
 	currStructType := btfPointerData.Target
 	offset := uint32(0)
-	if f.Name != "" {
-		fields := strings.Split(f.Name, ".")
-		for _, name := range fields {
-			currStructType = btf.UnderlyingType(currStructType)
-			off, bitOff, bitSize, typ, found := caculateOffset(name, currStructType)
-			if !found {
-				fmt.Printf("%+v is not field of %+v\n", name, currStructType)
-				os.Exit(1)
-			}
-			currStructType = typ
-			offset += off
-			t.BitOff = bitOff
-			t.BitSize = bitSize
+
+	fields := strings.Split(f.Name, ".")
+	for _, name := range fields {
+		currStructType = btf.UnderlyingType(currStructType)
+		off, bitOff, bitSize, typ, found := caculateOffset(name, currStructType)
+		if !found {
+			fmt.Printf("%+v is not field of %+v\n", name, currStructType)
+			os.Exit(1)
 		}
+		currStructType = typ
+		offset += off
+		t.BitOff = bitOff
+		t.BitSize = bitSize
 	}
+
 	t.Typ = currStructType
 	t.Offsets = append(t.Offsets, offset)
 	if sz, err := btf.Sizeof(currStructType); err == nil {
@@ -184,11 +226,8 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) {
 		fmt.Printf("%+v cannot get size: %s\n", currStructType, err)
 		os.Exit(1)
 	}
-	if f.Name != "" {
-		t.Name += "->" + f.Name
-	} else {
-		t.Name = "*" + t.Name
-	}
+
+	t.Name += "->" + f.Name
 
 	genTraceDataByField(fs, idx+1, currStructType, t)
 
@@ -197,6 +236,7 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) {
 var funcParserFunc = sync.OnceValue[*participle.Parser[FuncExpr]](func() *participle.Parser[FuncExpr] {
 	clexer := lexer.MustSimple([]lexer.SimpleRule{
 		{Name: "DereferenceOperator", Pattern: `\*`},
+		{Name: "Struct", Pattern: `struct`},
 		{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z_0-9]*`},
 		{Name: "ArrowOperator", Pattern: `->`},
 		{Name: "ShowString", Pattern: `:str`},
