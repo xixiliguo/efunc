@@ -187,7 +187,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			left := 64 - bitOff - bitSize
 			right := 64 - bitSize
 			num = (num << uint64(left)) >> uint64(right)
-			if !opt.showZero && num == 0 {
+			if !opt.showZero && num == 0 && offset != 0 {
 				return true
 			}
 			if t.Encoding == btf.Signed {

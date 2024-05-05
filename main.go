@@ -185,6 +185,12 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 			}
 			for _, data := range expr.Datas {
 				t := genTraceData(data, info)
+				if int(t.Base) > len(fn.trace) {
+					continue
+				}
+				if int(t.Index) > len(fn.trace) {
+					continue
+				}
 				if t.onEntry {
 					fn.trace = append(fn.trace, t)
 				} else {
@@ -568,7 +574,6 @@ func (fg *FuncGraph) load() error {
 		spec.Programs["funcentry"].AttachType = ebpf.AttachTraceKprobeMulti
 		spec.Programs["funcret"].AttachType = ebpf.AttachTraceKprobeMulti
 	}
-
 	if err := spec.LoadAndAssign(&fg.objs, nil); err != nil {
 		var verifyError *ebpf.VerifierError
 		if errors.As(err, &verifyError) {
@@ -593,7 +598,12 @@ func (fg *FuncGraph) load() error {
 		// f.TraceCnt = uint8(len(fn.trace))
 		for i, t := range fn.trace {
 			ft := funcgraphTraceData{
+				BaseAddr:    t.BaseAddr,
 				Para:        uint8(t.Para),
+				Base:        t.Base,
+				Index:       t.Index,
+				Scale:       t.Scale,
+				Imm:         t.Imm,
 				IsStr:       t.isStr,
 				FieldCnt:    uint8(len(t.Offsets)),
 				Offsets:     [20]uint32{},
@@ -602,6 +612,8 @@ func (fg *FuncGraph) load() error {
 				CmpOperator: t.CmpOperator,
 				Target:      t.Target,
 				S_target:    t.S_target,
+				BitOff:      t.BitOff,
+				BitSize:     t.BitSize,
 			}
 			copy(ft.Offsets[:], t.Offsets)
 			f.Trace[i] = ft

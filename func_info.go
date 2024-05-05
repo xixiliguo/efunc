@@ -22,10 +22,22 @@ type FuncExpr struct {
 type DataExpr struct {
 	Dereference bool    `parser:"@DereferenceOperator?"`
 	Typ         string  `parser:"(LeftEdge Struct Whitespace @Ident Whitespace DereferenceOperator RightEdge)?"`
-	First       string  `parser:"@Ident"`
+	First       Primary `parser:"@@"`
 	Fields      []Field `parser:"@@*"`
 	SohwString  bool    `parser:"@ShowString?"`
 	CompareInfo Compare `parser:"@@?"`
+}
+
+type Primary struct {
+	Name string `parser:"@Ident"`
+	Addr Addr   `parser:"| LeftEdge @@ RightEdge"`
+}
+
+type Addr struct {
+	Base  uint64 `parser:"@Number"`
+	Index uint64 `parser:"Separator @Number"`
+	Scale uint64 `parser:"Separator @Number"`
+	Imm   uint64 `parser:"Separator @Number"`
 }
 
 type Field struct {
@@ -56,7 +68,12 @@ type TraceData struct {
 	onEntry     bool
 	isStr       bool
 	Typ         btf.Type
+	BaseAddr    bool
 	Para        int
+	Base        uint64
+	Index       uint64
+	Scale       uint64
+	Imm         uint64
 	Offsets     []uint32
 	Size        int
 	BitOff      uint32
@@ -73,25 +90,62 @@ func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 	var btfData btf.Type
 	proto := fn.Type.(*btf.FuncProto)
 
-	if dataExpr.First != "ret" {
-		for idx, para := range proto.Params {
-			if dataExpr.First == para.Name {
-				t.Name = para.Name
-				t.onEntry = true
-				t.Para = idx
-				t.Size = 8
-				t.Typ = para.Type
-				btfData = para.Type
-				break
+	if dataExpr.First.Name != "" {
+		if dataExpr.First.Name != "ret" {
+			for idx, para := range proto.Params {
+				if dataExpr.First.Name == para.Name {
+					t.Name = para.Name
+					t.onEntry = true
+					t.Para = idx
+					t.Size = 8
+					t.Typ = para.Type
+					btfData = para.Type
+					break
+				}
 			}
+		} else {
+			t.Name = "ret"
+			t.onEntry = false
+			t.Size = 8
+			t.Typ = proto.Return
+			btfData = proto.Return
 		}
+
 	} else {
-		t.Name = "ret"
-		t.onEntry = false
+		t.Name = fmt.Sprintf("(struct %s *)(%d,%d,%d,%d)", dataExpr.Typ,
+			dataExpr.First.Addr.Base,
+			dataExpr.First.Addr.Index,
+			dataExpr.First.Addr.Scale,
+			dataExpr.First.Addr.Imm)
+		t.BaseAddr = true
+		t.Base = dataExpr.First.Addr.Base
+		t.Index = dataExpr.First.Addr.Index
+		t.Scale = dataExpr.First.Addr.Scale
+		t.Imm = dataExpr.First.Addr.Imm
+		t.onEntry = true
+
+		spec, err := loadbtfSpec("")
+		if err != nil {
+			fmt.Printf("loadbtfSpec: %s\n", err)
+			os.Exit(1)
+		}
+		structPtr := &btf.Struct{}
+		err = spec.TypeByName(dataExpr.Typ, &structPtr)
+		if err != nil {
+			fmt.Printf("TypeByName %s: %s\n", dataExpr.Typ, err)
+			os.Exit(1)
+		}
+
+		pointer := &btf.Pointer{
+			Target: structPtr,
+		}
+		t.Typ = pointer
 		t.Size = 8
-		t.Typ = proto.Return
-		btfData = proto.Return
+		btfData = pointer
+		dataExpr.Typ = ""
 	}
+
+	fmt.Println(dataExpr.First, btfData)
 
 	if btfData != nil {
 
@@ -142,7 +196,7 @@ func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 		}
 
 	} else {
-		fmt.Printf("%s is not parameter of %s\n", dataExpr.First, fn)
+		fmt.Printf("%+v is not parameter of %s\n", dataExpr.First, fn)
 		os.Exit(1)
 	}
 	if dataExpr.SohwString {
