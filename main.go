@@ -593,11 +593,15 @@ func (fg *FuncGraph) load() error {
 		// f.TraceCnt = uint8(len(fn.trace))
 		for i, t := range fn.trace {
 			ft := funcgraphTraceData{
-				Para:     uint8(t.Para),
-				IsStr:    t.isStr,
-				FieldCnt: uint8(len(t.Offsets)),
-				Offsets:  [20]uint32{},
-				Size:     uint16(t.Size),
+				Para:        uint8(t.Para),
+				IsStr:       t.isStr,
+				FieldCnt:    uint8(len(t.Offsets)),
+				Offsets:     [20]uint32{},
+				Size:        uint16(t.Size),
+				IsSign:      t.isSign,
+				CmpOperator: t.CmpOperator,
+				Target:      t.Target,
+				S_target:    t.S_target,
 			}
 			copy(ft.Offsets[:], t.Offsets)
 			f.Trace[i] = ft

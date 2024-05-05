@@ -1,6 +1,7 @@
 //go:build ignore
 
 
+#include "include/vmlinux.h"
 #include "vmlinux.h"
 #include "bpf_helpers.h"
 #include "bpf_core_read.h"
@@ -54,6 +55,13 @@ struct {
 	__type(value, bool);
 } ready SEC(".maps");
 
+#define CMP_NOP		0
+#define CMP_EQ		1
+#define CMP_NOTEQ	2
+#define CMP_GT		3
+#define CMP_GE		4
+#define CMP_LT		5
+#define CMP_LE		6
 
 struct trace_data {
 	u8 para;
@@ -61,6 +69,10 @@ struct trace_data {
 	u8 field_cnt;
 	u32 offsets[MAX_TRACE_FIELD_LEN];
 	u16 size;
+	bool is_sign;
+	u8 cmp_operator;
+	u64 target;
+	s64 s_target;
 };
 
 
@@ -370,6 +382,126 @@ static __always_inline void extract_ret_trace_data(struct func_ret_event *r, str
 	}
 }
 
+static __always_inline bool trace_have_filter_expr(struct func *fn) {
+
+	for (int i=0; i < fn->trace_cnt && i < MAX_TRACES; i++) {
+		struct trace_data t = fn->trace[i];
+		if (t.cmp_operator != CMP_NOP) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static __always_inline bool trace_data_allowed(struct func_entry_event *e, struct func *fn) {
+
+	bool verdict = false;
+	u8 cmp_cnt =  0;
+
+	for (int i=0; i < fn->trace_cnt && i < MAX_TRACES; i++) {
+
+		u64 src_data = 0;
+		s64 s_src_data = 0;
+		struct trace_data t = fn->trace[i];
+
+		u16 off = i * MAX_TRACE_DATA;
+
+		if (!t.is_sign) {
+			if (t.size == 1) {
+				src_data = *(u8 *)&e->buf[off];
+			} 
+			if (t.size == 2) {
+				src_data = *(u16 *)&e->buf[off];
+			} 
+			if (t.size == 4) {
+				src_data = *(u32 *)&e->buf[off];
+			} 
+			if (t.size == 8) {
+				src_data = *(u64 *)&e->buf[off];
+			} 
+		}
+
+		if (t.is_sign) {
+			if (t.size == 1) {
+				s_src_data = *(s8 *)&e->buf[off];
+			} 
+			if (t.size == 2) {
+				s_src_data = *(s16 *)&e->buf[off];
+			} 
+			if (t.size == 4) {
+				s_src_data = *(s32 *)&e->buf[off];
+			} 
+			if (t.size == 8) {
+				s_src_data = *(s64 *)&e->buf[off];
+			} 
+		}
+
+		if (t.cmp_operator == CMP_NOP) {
+			continue;
+		}
+
+		cmp_cnt++;
+
+		if (!t.is_sign  && t.cmp_operator == CMP_EQ && src_data == t.target){
+				verdict = true;
+				break;
+		}
+		if (!t.is_sign  && t.cmp_operator == CMP_NOTEQ && src_data != t.target){
+			verdict = true;
+			break;
+		}
+		if (!t.is_sign  && t.cmp_operator == CMP_GT && src_data > t.target){
+			verdict = true;
+			break;
+		}
+		if (!t.is_sign  && t.cmp_operator == CMP_GE && src_data >= t.target){
+			verdict = true;
+			break;
+		}
+		if (!t.is_sign  && t.cmp_operator == CMP_LT && src_data < t.target){
+			verdict = true;
+			break;
+		}
+		if (!t.is_sign == false && t.cmp_operator == CMP_LE && src_data <= t.target){
+			verdict = true;
+			break;
+		}	
+
+		if (t.is_sign  && t.cmp_operator == CMP_EQ && s_src_data == t.s_target){
+				verdict = true;
+				break;
+		}
+		if (t.is_sign  && t.cmp_operator == CMP_NOTEQ && s_src_data != t.s_target){
+			verdict = true;
+			break;
+		}
+		if (t.is_sign  && t.cmp_operator == CMP_GT && s_src_data > t.s_target){
+			verdict = true;
+			break;
+		}
+		if (t.is_sign  && t.cmp_operator == CMP_GE && s_src_data >= t.s_target){
+			verdict = true;
+			break;
+		}
+		if (t.is_sign  && t.cmp_operator == CMP_LT && s_src_data < t.s_target){
+			verdict = true;
+			break;
+		}
+		if (t.is_sign == false && t.cmp_operator == CMP_LE && s_src_data <= t.s_target){
+			verdict = true;
+			break;
+		}	
+
+	}
+
+	if (cmp_cnt == 0) {
+		return true;
+	}
+	
+	return verdict;
+}
+
+
 
 static __always_inline void extract_func_paras(struct func_entry_event *e, struct pt_regs *ctx) {
 
@@ -406,6 +538,34 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
 			}
 			return 0;
 		}
+
+		if (trace_have_filter_expr(fn)) {
+			struct func_entry_event *entry_info;
+			entry_info = bpf_ringbuf_reserve(&events, sizeof(struct func_entry_event) + MAX_TRACE_BUF, 0);
+			if (!entry_info) {
+			} else {
+				entry_info->type = ENTRY_EVENT;
+				entry_info->task = task;
+				entry_info->cpu_id = bpf_get_smp_processor_id();
+				entry_info->depth = 0;
+				entry_info->seq_id = 0;
+				entry_info->ip = ip;
+				entry_info->id = fn->id;
+				entry_info->time = bpf_ktime_get_ns();
+				extract_func_paras(entry_info, ctx);
+				entry_info->have_data = true;
+				extract_trace_data(entry_info, fn);
+				if (trace_data_allowed(entry_info,fn) == false) {
+					if (verbose) {
+						bpf_printk("func %s will not be traced since it was filtered", (char *)&fn->name);
+					}
+					bpf_ringbuf_discard(entry_info, 0);
+					return 0;
+				}
+				bpf_ringbuf_discard(entry_info, 0);
+			}
+		}
+
 		bpf_map_update_elem(&call_events, &task, &empty_call_event, BPF_ANY);
 		e = bpf_map_lookup_elem(&call_events, &task);
 		if (!e) {

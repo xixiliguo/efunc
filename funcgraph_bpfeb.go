@@ -39,7 +39,7 @@ type funcgraphFunc struct {
 	_           [2]byte
 	Trace       [5]funcgraphTraceData
 	RetTraceCnt uint8
-	_           [3]byte
+	_           [7]byte
 	RetTrace    [5]funcgraphTraceData
 }
 
@@ -87,13 +87,16 @@ type funcgraphStartEvent struct {
 }
 
 type funcgraphTraceData struct {
-	Para     uint8
-	IsStr    bool
-	FieldCnt uint8
-	_        [1]byte
-	Offsets  [20]uint32
-	Size     uint16
-	_        [2]byte
+	Para        uint8
+	IsStr       bool
+	FieldCnt    uint8
+	_           [1]byte
+	Offsets     [20]uint32
+	Size        uint16
+	IsSign      bool
+	CmpOperator uint8
+	Target      uint64
+	S_target    int64
 }
 
 // loadFuncgraph returns the embedded CollectionSpec for funcgraph.

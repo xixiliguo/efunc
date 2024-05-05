@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -38,7 +39,7 @@ type Compare struct {
 
 type Value struct {
 	String *string `parser:"@Ident"`
-	Int    *int    `parser:"| @Number"`
+	Int    *string `parser:"| @Number"`
 }
 
 type FuncInfo struct {
@@ -51,15 +52,19 @@ type FuncInfo struct {
 }
 
 type TraceData struct {
-	Name    string
-	onEntry bool
-	isStr   bool
-	Typ     btf.Type
-	Para    int
-	Offsets []uint32
-	Size    int
-	BitOff  uint32
-	BitSize uint32
+	Name        string
+	onEntry     bool
+	isStr       bool
+	Typ         btf.Type
+	Para        int
+	Offsets     []uint32
+	Size        int
+	BitOff      uint32
+	BitSize     uint32
+	isSign      bool
+	CmpOperator uint8
+	Target      uint64
+	S_target    int64
 }
 
 func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
@@ -143,6 +148,45 @@ func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 	if dataExpr.SohwString {
 		t.isStr = true
 		t.Size = 1024
+	}
+
+	if dataExpr.CompareInfo.Operator != "" {
+		t.CmpOperator = convertCMPOp(dataExpr.CompareInfo.Operator)
+
+		switch typ := btf.UnderlyingType(t.Typ).(type) {
+		case *btf.Int:
+			if typ.Encoding == btf.Signed {
+				t.isSign = true
+			}
+			if target := dataExpr.CompareInfo.Threshold.Int; target != nil {
+				var err error
+				if t.isSign {
+					t.S_target, err = strconv.ParseInt(*target, 0, 64)
+					if err != nil {
+						fmt.Printf("%s fail to ParseInt: %s\n", *target, err)
+						os.Exit(1)
+					}
+				} else {
+					t.Target, err = strconv.ParseUint(*target, 0, 64)
+					if err != nil {
+						fmt.Printf("%s fail to ParseUint: %s\n", *target, err)
+						os.Exit(1)
+					}
+				}
+			}
+		case *btf.Pointer:
+			target := dataExpr.CompareInfo.Threshold.Int
+			var err error
+			t.Target, err = strconv.ParseUint(*target, 0, 64)
+			if err != nil {
+				fmt.Printf("%s fail to ParseUint: %s\n", *target, err)
+				os.Exit(1)
+			}
+		default:
+			fmt.Printf("%s do not support cmp now\n", typ)
+			os.Exit(1)
+		}
+
 	}
 	fmt.Printf("result: %+v\n\n", t)
 	return t
@@ -247,7 +291,7 @@ var funcParserFunc = sync.OnceValue[*participle.Parser[FuncExpr]](func() *partic
 		{Name: "RightEdge", Pattern: `\)`},
 		{Name: "Separator", Pattern: `,`},
 		{Name: "Operator", Pattern: `>=|>|==|!=|<=|<`},
-		{Name: "Number", Pattern: `\d+`},
+		{Name: "Number", Pattern: `(0x[a-zA-Z_0-9]+)|([-+]?\d+)`},
 	})
 
 	parser, _ := participle.Build[FuncExpr](participle.Lexer(clexer))
@@ -327,4 +371,22 @@ func typToString(typ btf.Type) string {
 		re = fmt.Sprintf("don't know how to toString Type %v", typ)
 	}
 	return re
+}
+
+func convertCMPOp(op string) uint8 {
+	switch op {
+	case "==":
+		return 1
+	case "!=":
+		return 2
+	case ">":
+		return 3
+	case ">=":
+		return 4
+	case "<":
+		return 5
+	case "<=":
+		return 6
+	}
+	return 0
 }
