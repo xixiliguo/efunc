@@ -1222,7 +1222,7 @@ ENVIRONMENT:
 	`, cli.AppHelpTemplate)
 	app := &cli.App{
 		Usage:   "A eBPF-based trace tool like ftrace funcgraph",
-		Version: "0.0.2",
+		Version: "0.0.3",
 		Commands: []*cli.Command{
 			{
 				Name:  "info",
