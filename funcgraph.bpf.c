@@ -320,23 +320,19 @@ static __always_inline void extract_trace_data(struct func_entry_event *e, struc
 			u64 prev_data = 0;
 			u64 data = e->para[t.para];
 			if (t.base_addr) {
-				if (t.base == 0 || (t.base -1) >= i) {
+				if (t.base < i) {
+				u16 b = t.base * MAX_TRACE_DATA; 
+				bpf_probe_read_kernel(&data, 8, &e->buf[b]);
+					if (t.scale != 0 && t.index < i) {
+						u16 bi = t.index * MAX_TRACE_DATA; 
+						u64 i = 0;
+						bpf_probe_read_kernel(&i, 8, &e->buf[bi]);
+						data = i * t.scale;
+					}
+				} else {
 					continue;
 				}
-
-				u16 b = (t.base -1) * MAX_TRACE_DATA; 
-				bpf_probe_read_kernel(&data, 8, &e->buf[b]);
-				if (t.index != 0) {
-					if (t.index -1 >= i) {
-						continue;
-					}
-					u16 bi = (t.index -1) * MAX_TRACE_DATA; 
-					u64 i = 0;
-					bpf_probe_read_kernel(&i, 8, &e->buf[bi]);
-					data = i * t.scale;
-				}
 			}
-		
 			bpf_probe_read_kernel(&e->buf[off], 8, &data);
 			for (u8 idx=0; idx < t.field_cnt && idx < MAX_TRACE_FIELD_LEN; idx++) {
 				data += t.offsets[idx];
@@ -432,7 +428,7 @@ static __always_inline bool trace_data_allowed(struct func_entry_event *e, struc
 		u16 off = i * MAX_TRACE_DATA;
 
 		if (t.bitSize != 0) {
-            u64 num;
+            u64 num = 0;
 
 			if (t.size == 1) {
 				num = *(u8 *)&e->buf[off];

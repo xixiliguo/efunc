@@ -183,18 +183,34 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 				id:      id,
 				btfinfo: info,
 			}
-			for _, data := range expr.Datas {
+			pos := make([]int, len(expr.Datas))
+			isEntry := make([]bool, len(expr.Datas))
+			for idx, data := range expr.Datas {
 				t := genTraceData(data, info)
-				if int(t.Base) > len(fn.trace) {
-					continue
-				}
-				if int(t.Index) > len(fn.trace) {
-					continue
+				if t.BaseAddr {
+					if int(t.Base) >= idx {
+						continue
+					}
+					if int(t.Index) >= idx {
+						continue
+					}
+					if t.Scale != 0 {
+						if isEntry[t.Base] != isEntry[t.Index] {
+							continue
+						}
+					}
+					t.onEntry = isEntry[t.Base]
+					t.Base = uint64(pos[t.Base])
+					t.Index = uint64(pos[t.Index])
 				}
 				if t.onEntry {
 					fn.trace = append(fn.trace, t)
+					pos[idx] = len(fn.trace) - 1
+					isEntry[idx] = true
 				} else {
 					fn.retTrace = append(fn.retTrace, t)
+					pos[idx] = len(fn.retTrace) - 1
+					isEntry[idx] = false
 				}
 			}
 			return fn, true
@@ -621,11 +637,22 @@ func (fg *FuncGraph) load() error {
 		}
 		for i, t := range fn.retTrace {
 			ft := funcgraphTraceData{
-				Para:     uint8(t.Para),
-				IsStr:    t.isStr,
-				FieldCnt: uint8(len(t.Offsets)),
-				Offsets:  [20]uint32{},
-				Size:     uint16(t.Size),
+				BaseAddr:    t.BaseAddr,
+				Para:        uint8(t.Para),
+				Base:        t.Base,
+				Index:       t.Index,
+				Scale:       t.Scale,
+				Imm:         t.Imm,
+				IsStr:       t.isStr,
+				FieldCnt:    uint8(len(t.Offsets)),
+				Offsets:     [20]uint32{},
+				Size:        uint16(t.Size),
+				IsSign:      t.isSign,
+				CmpOperator: t.CmpOperator,
+				Target:      t.Target,
+				S_target:    t.S_target,
+				BitOff:      t.BitOff,
+				BitSize:     t.BitSize,
 			}
 			copy(ft.Offsets[:], t.Offsets)
 			f.RetTrace[i] = ft
