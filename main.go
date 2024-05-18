@@ -30,9 +30,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS fake nanosleep.bpf.c -- -D__TARGET_ARCH_x86 -I./include
+//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 fake nanosleep.bpf.c -- -I./include
 
-//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -type start_event -type func_entry_event -type func_ret_event -type trace_data funcgraph funcgraph.bpf.c -- -D__TARGET_ARCH_x86 -I./include
+//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 -type start_event -type func_entry_event -type func_ret_event -type trace_data funcgraph funcgraph.bpf.c -- -I./include
 
 type Event uint8
 
