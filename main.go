@@ -1214,8 +1214,8 @@ func main() {
 EXAMPLES:
 	./efunc info "ip_rcv"
 	./efunc info "ip_rcv(*skb, skb->len, skb->dev.name)"
-	./efunc trace -e ".ip_rcv(skb->len)" -a ":net/ipv4/*" -a "virtio_net:*"	
-	./efunc trace -e "tcp_v4_rcv(skb,(struct tcphdr *)skb->data,(struct tcphdr *)(1,0,0,0)->syn == 1"
+	./efunc trace -e "ip_rcv(skb->len)" -a ":net/ipv4/*" -a "virtio_net:*"	
+	./efunc trace -e "tcp_v4_rcv(skb,(struct tcphdr *)skb->data,(struct tcphdr *)(1,0,0,0)->syn == 1)"
 
 ENVIRONMENT:
 	BTF_SHOW_ZERO		[default: 0] show field info even value is zero
