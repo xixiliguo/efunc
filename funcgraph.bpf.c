@@ -1,7 +1,6 @@
 //go:build ignore
 
 
-#include "include/vmlinux.h"
 #include "vmlinux.h"
 #include "bpf_helpers.h"
 #include "bpf_core_read.h"
@@ -9,12 +8,6 @@
 #include "bpf_tracing.h"
 
 char __license[] SEC("license") = "Dual MIT/GPL";
-
-
-volatile const bool verbose = false;
-volatile const bool has_bpf_get_func_ip = false;
-volatile const u64 kret_offset = 0;
-
 
 #define COMM_LEN 16
 #define PARA_LEN 5
@@ -28,33 +21,6 @@ volatile const u64 kret_offset = 0;
 #define MAX_TRACE_DATA 1024
 #define MAX_TRACE_BUF	(MAX_TRACES * MAX_TRACE_DATA)
 
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, char[COMM_LEN]);
-	__type(value, bool);
-	__uint(max_entries, 99); /* could be overriden from user-space */
-} comms_filter SEC(".maps");
-volatile const u32 comm_allow_cnt = 0;
-volatile const u32 comm_deny_cnt = 0;
-
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__type(key, u32);
-	__type(value, bool);
-	__uint(max_entries, 99); /* could be overriden from user-space */
-} pids_filter SEC(".maps");
-
-volatile const u32 pid_allow_cnt = 0;
-volatile const u32 pid_deny_cnt = 0;
-
-
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 1);
-	__type(key, u64);
-	__type(value, bool);
-} ready SEC(".maps");
-
 #define CMP_NOP		0
 #define CMP_EQ		1
 #define CMP_NOTEQ	2
@@ -62,6 +28,29 @@ struct {
 #define CMP_GE		4
 #define CMP_LT		5
 #define CMP_LE		6
+
+#define CALL_EVENT 0
+#define START_EVENT 1
+#define ENTRY_EVENT 2
+#define RET_EVENT 3
+
+#define CALL_EVENT_SUCCESS 0
+#define CALL_EVENT_DROP 1
+#define START_EVENT_SUCCESS 2
+#define START_EVENT_DROP 3
+#define ENTRY_EVENT_SUCCESS 4
+#define ENTRY_EVENT_DROP 5
+#define RET_EVENT_SUCCESS 6
+#define RET_EVENT_DROP 7
+
+volatile const bool verbose = false;
+volatile const bool has_bpf_get_func_ip = false;
+volatile const u64 kret_offset = 0;
+
+volatile const u32 comm_allow_cnt = 0;
+volatile const u32 comm_deny_cnt = 0;
+volatile const u32 pid_allow_cnt = 0;
+volatile const u32 pid_deny_cnt = 0;
 
 struct trace_data {
 	bool base_addr;
@@ -81,8 +70,6 @@ struct trace_data {
 	u32  bitOff;
 	u32 bitSize;
 };
-
-
 struct func {
 	u32 id;
 	bool is_main_entry;
@@ -92,30 +79,6 @@ struct func {
 	u8 ret_trace_cnt;
 	struct trace_data ret_trace[MAX_TRACES];
 };
-
-struct {
-	__uint(type, BPF_MAP_TYPE_HASH);
-	__uint(max_entries, 9999);
-	__type(key, u64);
-	__type(value, struct func);
-} func_info SEC(".maps");
-
-
-#define CALL_EVENT 0
-#define START_EVENT 1
-#define ENTRY_EVENT 2
-#define RET_EVENT 3
-
-#define CALL_EVENT_SUCCESS 0
-#define CALL_EVENT_DROP 1
-#define START_EVENT_SUCCESS 2
-#define START_EVENT_DROP 3
-#define ENTRY_EVENT_SUCCESS 4
-#define ENTRY_EVENT_DROP 5
-#define RET_EVENT_SUCCESS 6
-#define RET_EVENT_DROP 7
-
-
 
 struct start_event {
 	u8 type;
@@ -172,6 +135,34 @@ struct call_event {
 
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, char[COMM_LEN]);
+	__type(value, bool);
+	__uint(max_entries, 99);
+} comms_filter SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, u32);
+	__type(value, bool);
+	__uint(max_entries, 99);
+} pids_filter SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 1);
+	__type(key, u64);
+	__type(value, bool);
+} ready SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, 9999);
+	__type(key, u64);
+	__type(value, struct func);
+} func_info SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 8);
 	__type(key, u64);
 	__type(value, u64);
@@ -183,7 +174,6 @@ struct {
 	__type(key, u64);
 	__type(value, struct call_event);
 } call_events SEC(".maps");
-
 
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -244,7 +234,6 @@ static __always_inline bool pid_allowed(void)
 	bool *verdict_ptr;
 	u32 pid;
 
-	/* if no PID filters -- allow everything */
 	if (pid_allow_cnt + pid_deny_cnt == 0)
 		return true;
 
@@ -252,7 +241,6 @@ static __always_inline bool pid_allowed(void)
 
 	verdict_ptr = bpf_map_lookup_elem(&pids_filter, &pid);
 	if (!verdict_ptr) {
-		/* if allowlist is non-empty, then PID didn't pass the check */
 		return pid_allow_cnt == 0;
 	}
 	return *verdict_ptr;
@@ -265,7 +253,6 @@ static __always_inline bool comm_allowed(void)
 
 	bool *verdict_ptr;
 
-	/* if no COMM filters -- allow everything */
 	if (comm_allow_cnt + comm_deny_cnt == 0)
 		return true;
 
@@ -273,7 +260,6 @@ static __always_inline bool comm_allowed(void)
 
 	verdict_ptr = bpf_map_lookup_elem(&comms_filter, comm);
 	if (!verdict_ptr)
-		/* if allowlist is non-empty, then COMM didn't pass the check */
 		return comm_allow_cnt == 0;
 
 	return *verdict_ptr;
@@ -340,20 +326,10 @@ static __always_inline void extract_trace_data(struct func_entry_event *e, struc
 				bpf_probe_read_kernel(&data, sizeof(data), (void *)data);
 			}
 			if (prev_data != 0) {
-				// if (off + MAX_TRACE_DATA >= MAX_TRACE_BUF) {
-				// 	break;
-				// }
-				// u8 *ptr = ;
-				// if (ptr > &e->buf[MAX_TRACE_BUF]) {
-				// 	continue;
-				// }
 				u16 sz = t.size;
 				if (sz > MAX_TRACE_DATA) {
 					sz = MAX_TRACE_DATA;
 				}
-				// if (verbose) {
-				// 	bpf_printk("start: %d size: %d addr: %llx", start, t.size, prev_data);
-				// }
 				bpf_probe_read_kernel(&e->buf[off], sz, (void *)prev_data);
 				if (t.is_str) {
 					bpf_probe_read_kernel_str(&e->buf[off], MAX_TRACE_DATA, (void *)data);
@@ -380,20 +356,10 @@ static __always_inline void extract_ret_trace_data(struct func_ret_event *r, str
 			bpf_probe_read_kernel(&data, sizeof(data), (void *)data);
 		}
 		if (prev_data != 0) {
-			// if (off + MAX_TRACE_DATA >= MAX_TRACE_BUF) {
-			// 	break;
-			// }
-			// u8 *ptr = ;
-			// if (ptr > &e->buf[MAX_TRACE_BUF]) {
-			// 	continue;
-			// }
 			u16 sz = t.size;
 			if (sz > MAX_TRACE_DATA) {
 				sz = MAX_TRACE_DATA;
 			}
-			// if (verbose) {
-			// 	bpf_printk("start: %d size: %d addr: %llx", start, t.size, prev_data);
-			// }
 			bpf_probe_read_kernel(&r->buf[off], sz, (void *)prev_data);
 			if (t.is_str) {
 				bpf_probe_read_kernel_str(&r->buf[off], MAX_TRACE_DATA, (void *)data);
@@ -782,46 +748,6 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
 	}
 
 
-
-	// if (fn->trace_cnt == 0) {
-	// 	struct func_entry_event *entry_info;
-	// 	entry_info = bpf_ringbuf_reserve(&events, sizeof(struct func_entry_event), 0);
-	// 	if (!entry_info) {
-	// 		update_event_stat(ENTRY_EVENT_DROP);
-	// 	} else {
-	// 		update_event_stat(ENTRY_EVENT_SUCCESS);
-	// 		entry_info->type = ENTRY_EVENT;
-	// 		entry_info->task = task;
-	// 		entry_info->cpu_id = bpf_get_smp_processor_id();
-	// 		entry_info->depth = d;
-	// 		entry_info->seq_id = e->next_seq_id;
-	// 		entry_info->ip = ip;
-	// 		entry_info->id = fn->id;
-	// 		entry_info->time = bpf_ktime_get_ns();
-	// 		extract_func_paras(entry_info, ctx);
-	// 		bpf_ringbuf_submit(entry_info, 0);
-	// 	}
-	// } else {
-	// 	struct func_entry_event *entry_info;
-	// 	entry_info = bpf_ringbuf_reserve(&events, sizeof(struct func_entry_event) + MAX_TRACE_BUF, 0);
-	// 	if (!entry_info) {
-	// 		update_event_stat(ENTRY_EVENT_DROP);
-	// 	} else {
-	// 		update_event_stat(ENTRY_EVENT_SUCCESS);
-	// 		entry_info->type = ENTRY_EVENT;
-	// 		entry_info->task = task;
-	// 		entry_info->cpu_id = bpf_get_smp_processor_id();
-	// 		entry_info->depth = d;
-	// 		entry_info->seq_id = e->next_seq_id;
-	// 		entry_info->ip = ip;
-	// 		entry_info->id = fn->id;
-	// 		entry_info->time = bpf_ktime_get_ns();
-	// 		extract_func_paras(entry_info, ctx);
-	// 		entry_info->have_data = true;
-	// 		extract_trace_data(entry_info, fn);
-	// 		bpf_ringbuf_submit(entry_info, 0);
-	// 	}
-	// }
 
 	if (fn->ret_trace_cnt == 0) {
 		struct func_ret_event *ret_info;
