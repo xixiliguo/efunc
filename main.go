@@ -963,7 +963,8 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 		sym := funcInfo.Symbol
 		prevSeqId = e.SeqId
 		if e.Type == uint8(EntryEvent) {
-			if i+1 < len(events) && events[i+1].Type == uint8(RetEvent) && events[i+1].Ip == e.Ip {
+			if i+1 < len(events) && events[i+1].Type == uint8(RetEvent) &&
+				events[i+1].Ip == e.Ip && events[i+1].CpuId == e.CpuId {
 				ret := &events[i+1]
 				d := time.Duration(ret.Duration)
 				id := strconv.FormatInt(int64(e.CpuId), 10)
