@@ -7,9 +7,11 @@ import (
 	"log"
 	"maps"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,6 +75,7 @@ type Option struct {
 	dryRun            bool
 	maxEntries        uint32
 	mode              string
+	target            string
 }
 
 type FuncEvent struct {
@@ -129,6 +132,10 @@ type FuncGraph struct {
 	objs            funcgraphObjects
 	opt             *dumpOption
 	spaceCache      [1024]byte
+	targetCmd       *exec.Cmd
+	targetCmdError  error
+	targetCmdRecv   chan int
+	targetCmdSend   chan int
 }
 
 func NewFuncGraph(opt Option) (*FuncGraph, error) {
@@ -144,6 +151,8 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 		comms:          map[[16]uint8]bool{},
 		taskToEvents:   map[uint64]*FuncEvents{},
 		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
+		targetCmdRecv:  make(chan int),
+		targetCmdSend:  make(chan int),
 	}
 	for i := 0; i < len(fg.spaceCache); i++ {
 		fg.spaceCache[i] = ' '
@@ -291,6 +300,15 @@ func (fg *FuncGraph) findBTFInfo(sym Symbol) (btf.TypeID, *btf.Func) {
 }
 
 func (fg *FuncGraph) parseOption(opt Option) error {
+
+	if opt.target != "" {
+		go fg.startCmd(opt.target, fg.targetCmdRecv, fg.targetCmdSend)
+		<-fg.targetCmdRecv
+		if fg.targetCmdError != nil {
+			return fg.targetCmdError
+		}
+		opt.allowPids = append(opt.allowPids, fg.targetCmd.Process.Pid)
+	}
 
 	ksyms, err := NewKSymCache()
 	if err != nil {
@@ -681,6 +699,28 @@ func (fg *FuncGraph) load() error {
 	return nil
 }
 
+func (fg *FuncGraph) startCmd(target string, recv, send chan int) {
+	data := strings.Fields(target)
+
+	runtime.LockOSThread()
+	cmd := exec.Command(data[0], data[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Ptrace: true}
+
+	err := cmd.Start()
+	fg.targetCmd = cmd
+	fg.targetCmdError = err
+
+	recv <- 1
+	<-send
+	syscall.PtraceDetach(fg.targetCmd.Process.Pid)
+	fg.targetCmdError = cmd.Wait()
+	runtime.UnlockOSThread()
+	recv <- 2
+}
+
 func (fg *FuncGraph) run() error {
 	if fg.dryRun {
 		fmt.Printf("will not run when run dry run mode\n")
@@ -734,6 +774,10 @@ func (fg *FuncGraph) run() error {
 		return fmt.Errorf("update ready map: %w", err)
 	}
 
+	if fg.targetCmd != nil {
+		fg.targetCmdSend <- 1
+	}
+
 	rd, err := ringbuf.NewReader(fg.objs.Events)
 	if err != nil {
 		return fmt.Errorf("opening ringbuf reader: %w", err)
@@ -744,7 +788,11 @@ func (fg *FuncGraph) run() error {
 	signal.Notify(fg.stopper, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		<-fg.stopper
+		select {
+		case <-fg.stopper:
+		case <-fg.targetCmdRecv:
+		}
+
 		if err := rd.Close(); err != nil {
 			fmt.Printf("closing ringbuf reader: %s\n", err)
 			os.Exit(1)
@@ -1381,6 +1429,19 @@ ENVIRONMENT:
 							return nil
 						},
 					},
+					&cli.StringFlag{
+						Name:    "command",
+						Aliases: []string{"cmd"},
+						Usage:   "trace only given command",
+						Action: func(ctx *cli.Context, s string) error {
+							if s != "" &&
+								(ctx.IntSlice("pid") != nil || ctx.IntSlice("no-pid") != nil ||
+									ctx.StringSlice("comm") != nil || ctx.StringSlice("no-comm") != nil) {
+								return fmt.Errorf("command can not combine with pid, no-pid, comm, no-comm")
+							}
+							return nil
+						},
+					},
 				},
 				Action: func(ctx *cli.Context) error {
 					exprFmt, _ := regexp.Compile(`.*\(.*\)`)
@@ -1435,6 +1496,7 @@ ENVIRONMENT:
 						dryRun:            ctx.Bool("dry-run"),
 						maxEntries:        uint32(ctx.Uint("max-entries")),
 						mode:              ctx.String("mode"),
+						target:            ctx.String("command"),
 					}
 
 					fg, err := NewFuncGraph(opt)
