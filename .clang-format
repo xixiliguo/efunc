@@ -1,3 +1,6 @@
 BasedOnStyle: Google
 SortIncludes: false
 IndentWidth: 4
+SpacesInLineCommentPrefix:
+  Minimum: 0
+  Maximum: 0

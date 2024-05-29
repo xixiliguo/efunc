@@ -148,8 +148,10 @@ type funcgraphSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type funcgraphProgramSpecs struct {
-	Funcentry *ebpf.ProgramSpec `ebpf:"funcentry"`
-	Funcret   *ebpf.ProgramSpec `ebpf:"funcret"`
+	Funcentry  *ebpf.ProgramSpec `ebpf:"funcentry"`
+	Funcret    *ebpf.ProgramSpec `ebpf:"funcret"`
+	HandleFork *ebpf.ProgramSpec `ebpf:"handle_fork"`
+	HandleFree *ebpf.ProgramSpec `ebpf:"handle_free"`
 }
 
 // funcgraphMapSpecs contains maps before they are loaded into the kernel.
@@ -209,14 +211,18 @@ func (m *funcgraphMaps) Close() error {
 //
 // It can be passed to loadFuncgraphObjects or ebpf.CollectionSpec.LoadAndAssign.
 type funcgraphPrograms struct {
-	Funcentry *ebpf.Program `ebpf:"funcentry"`
-	Funcret   *ebpf.Program `ebpf:"funcret"`
+	Funcentry  *ebpf.Program `ebpf:"funcentry"`
+	Funcret    *ebpf.Program `ebpf:"funcret"`
+	HandleFork *ebpf.Program `ebpf:"handle_fork"`
+	HandleFree *ebpf.Program `ebpf:"handle_free"`
 }
 
 func (p *funcgraphPrograms) Close() error {
 	return _FuncgraphClose(
 		p.Funcentry,
 		p.Funcret,
+		p.HandleFork,
+		p.HandleFree,
 	)
 }
 

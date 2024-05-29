@@ -76,6 +76,7 @@ type Option struct {
 	maxEntries        uint32
 	mode              string
 	target            string
+	inheritChild      bool
 }
 
 type FuncEvent struct {
@@ -136,6 +137,7 @@ type FuncGraph struct {
 	targetCmdError  error
 	targetCmdRecv   chan int
 	targetCmdSend   chan int
+	inheritChild    bool
 }
 
 func NewFuncGraph(opt Option) (*FuncGraph, error) {
@@ -153,6 +155,7 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
 		targetCmdRecv:  make(chan int),
 		targetCmdSend:  make(chan int),
+		inheritChild:   opt.inheritChild,
 	}
 	for i := 0; i < len(fg.spaceCache); i++ {
 		fg.spaceCache[i] = ' '
@@ -767,6 +770,20 @@ func (fg *FuncGraph) run() error {
 			fmt.Printf("kretprobe %s sucessfully\n", f.Name)
 			fg.links = append(fg.links, kretp)
 		}
+	}
+
+	if fg.inheritChild {
+		tp_fork, err := link.Tracepoint("sched", "sched_process_fork", fg.objs.HandleFork, nil)
+		if err != nil {
+			return fmt.Errorf("opening tracepoint sched_process_fork: %w", err)
+		}
+		defer tp_fork.Close()
+
+		tp_free, err := link.Tracepoint("sched", "sched_process_free", fg.objs.HandleFree, nil)
+		if err != nil {
+			return fmt.Errorf("opening tracepoint sched_process_free: %w", err)
+		}
+		defer tp_free.Close()
 	}
 
 	err := fg.objs.funcgraphMaps.Ready.Update(uint64(0), true, ebpf.UpdateAny)
@@ -1442,6 +1459,18 @@ ENVIRONMENT:
 							return nil
 						},
 					},
+					&cli.BoolFlag{
+						Name:  "inherit",
+						Usage: "trace children processes",
+						Action: func(ctx *cli.Context, b bool) error {
+							if b &&
+								ctx.IntSlice("pid") == nil &&
+								ctx.String("command") == "" {
+								return fmt.Errorf("must specfic pid or command with inherit option")
+							}
+							return nil
+						},
+					},
 				},
 				Action: func(ctx *cli.Context) error {
 					exprFmt, _ := regexp.Compile(`.*\(.*\)`)
@@ -1497,6 +1526,7 @@ ENVIRONMENT:
 						maxEntries:        uint32(ctx.Uint("max-entries")),
 						mode:              ctx.String("mode"),
 						target:            ctx.String("command"),
+						inheritChild:      ctx.Bool("inherit"),
 					}
 
 					fg, err := NewFuncGraph(opt)

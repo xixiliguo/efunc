@@ -835,3 +835,23 @@ int funcret(struct pt_regs *ctx) {
 
     return handle_ret(ctx);
 }
+
+SEC("tracepoint/sched/sched_process_fork")
+int handle_fork(struct trace_event_raw_sched_process_fork *ctx) {
+    u32 parent_pid = ctx->parent_pid;
+    u32 child_pid = ctx->child_pid;
+    bool *verdict_ptr;
+    bool allow = true;
+    verdict_ptr = bpf_map_lookup_elem(&pids_filter, &parent_pid);
+    if (verdict_ptr && *verdict_ptrl) {
+        bpf_map_update_elem(&pids_filter, &child_pid, &allow, BPF_ANY);
+    }
+    return 0;
+}
+
+SEC("tracepoint/sched/sched_process_free")
+int handle_free(struct trace_event_raw_sched_process_template *ctx) {
+    u32 pid = ctx->pid;
+    bpf_map_delete_elem(&pids_filter, &pid);
+    return 0;
+}
