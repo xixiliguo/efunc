@@ -843,7 +843,7 @@ int handle_fork(struct trace_event_raw_sched_process_fork *ctx) {
     bool *verdict_ptr;
     bool allow = true;
     verdict_ptr = bpf_map_lookup_elem(&pids_filter, &parent_pid);
-    if (verdict_ptr && *verdict_ptrl) {
+    if (verdict_ptr && *verdict_ptr) {
         bpf_map_update_elem(&pids_filter, &child_pid, &allow, BPF_ANY);
     }
     return 0;
