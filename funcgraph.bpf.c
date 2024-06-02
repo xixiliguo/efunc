@@ -50,6 +50,8 @@ volatile const u32 comm_deny_cnt = 0;
 volatile const u32 pid_allow_cnt = 0;
 volatile const u32 pid_deny_cnt = 0;
 
+volatile const u64 duration_ms = 0;
+
 struct trace_data {
     bool base_addr;
     u8 para;
@@ -791,6 +793,9 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
     e->next_seq_id++;
     if (d == 0) {
         e->end_time = bpf_ktime_get_ns();
+        if (duration_ms != 0 &&  (e->durations[0] / 1000000) < duration_ms) {
+            return 0;
+        }
         struct call_event *call_info;
         call_info = bpf_ringbuf_reserve(&events, sizeof(struct call_event), 0);
         if (!call_info) {

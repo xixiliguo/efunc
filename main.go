@@ -77,6 +77,7 @@ type Option struct {
 	mode              string
 	target            string
 	inheritChild      bool
+	duration          uint64
 }
 
 type FuncEvent struct {
@@ -138,6 +139,7 @@ type FuncGraph struct {
 	targetCmdRecv   chan int
 	targetCmdSend   chan int
 	inheritChild    bool
+	duration        uint64
 }
 
 func NewFuncGraph(opt Option) (*FuncGraph, error) {
@@ -156,6 +158,7 @@ func NewFuncGraph(opt Option) (*FuncGraph, error) {
 		targetCmdRecv:  make(chan int),
 		targetCmdSend:  make(chan int),
 		inheritChild:   opt.inheritChild,
+		duration:       opt.duration,
 	}
 	for i := 0; i < len(fg.spaceCache); i++ {
 		fg.spaceCache[i] = ' '
@@ -600,6 +603,7 @@ func (fg *FuncGraph) load() error {
 	consts["pid_deny_cnt"] = fg.deny_pid_cnt
 	consts["comm_allow_cnt"] = fg.allow_comm_cnt
 	consts["comm_deny_cnt"] = fg.deny_comm_cnt
+	consts["duration_ms"] = fg.duration
 
 	if err := spec.RewriteConstants(consts); err != nil {
 		return fmt.Errorf("spec RewriteConstants: %w", err)
@@ -853,19 +857,16 @@ func (fg *FuncGraph) run() error {
 			// }
 
 			// when miss last CallEvent, clean all pending events
-			if es, ok := fg.taskToEvents[startEvent.Task]; ok {
-				fmt.Printf("no call event received, delete %d events of task %#x anyway\n", len(*es), startEvent.Task)
-				delete(fg.taskToEvents, startEvent.Task)
-			}
+			// if es, ok := fg.taskToEvents[startEvent.Task]; ok {
+			// 	fmt.Printf("no call event received, delete %d events of task %#x anyway\n", len(*es), startEvent.Task)
+			delete(fg.taskToEvents, startEvent.Task)
+			// }
 			empty := fg.eventsPool.Get().(*FuncEvents)
 			empty.Reset()
 			fg.taskToEvents[startEvent.Task] = empty
 		case EntryEvent:
 			entryEvent := (*funcgraphFuncEntryEvent)(unsafe.Pointer(unsafe.SliceData(rec.RawSample)))
 			task := entryEvent.Task
-			if _, ok := fg.taskToEvents[task]; !ok {
-				fmt.Printf("no trace_start event before receive entry event of task %#x\n", task)
-			}
 			e := FuncEvent{
 				Type:  entryEvent.Type,
 				Task:  entryEvent.Task,
@@ -894,9 +895,6 @@ func (fg *FuncGraph) run() error {
 			// 	os.Exit(1)
 			// }
 			task := retEvent.Task
-			if _, ok := fg.taskToEvents[task]; !ok {
-				fmt.Printf("no trace_start event before receive ret event of task %#x\n", task)
-			}
 			// fmt.Printf("receive funcevent %+v\n", funcEvent)
 
 			e := FuncEvent{
@@ -1471,6 +1469,10 @@ ENVIRONMENT:
 							return nil
 						},
 					},
+					&cli.Uint64Flag{
+						Name:  "duration",
+						Usage: "show trace with duration >= xx ms",
+					},
 				},
 				Action: func(ctx *cli.Context) error {
 					exprFmt, _ := regexp.Compile(`.*\(.*\)`)
@@ -1527,6 +1529,7 @@ ENVIRONMENT:
 						mode:              ctx.String("mode"),
 						target:            ctx.String("command"),
 						inheritChild:      ctx.Bool("inherit"),
+						duration:          ctx.Uint64("duration"),
 					}
 
 					fg, err := NewFuncGraph(opt)
