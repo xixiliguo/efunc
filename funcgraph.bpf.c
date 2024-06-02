@@ -794,6 +794,7 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
     if (d == 0) {
         e->end_time = bpf_ktime_get_ns();
         if (duration_ms != 0 &&  (e->durations[0] / 1000000) < duration_ms) {
+            bpf_map_delete_elem(&call_events, &task);
             return 0;
         }
         struct call_event *call_info;
