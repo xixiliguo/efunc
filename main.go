@@ -21,18 +21,15 @@ import (
 	"unsafe"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/btf"
-	"github.com/cilium/ebpf/features"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/prometheus/procfs"
 	"github.com/urfave/cli/v2"
+	"github.com/xixiliguo/efunc/internal/sysinfo"
 	"golang.org/x/sys/unix"
 )
-
-//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 fake nanosleep.bpf.c -- -I./include
 
 //go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 -type start_event -type func_entry_event -type func_ret_event -type trace_data funcgraph funcgraph.bpf.c -- -I./include
 
@@ -464,97 +461,17 @@ func (fg *FuncGraph) init() error {
 		log.Fatal(err)
 	}
 
-	err := features.HaveProgramHelper(ebpf.Kprobe, asm.FnGetFuncIp)
-	if err != nil {
-		if errors.Is(err, ebpf.ErrNotSupported) {
-			fg.haveGetFuncIP = false
-		} else {
-			return err
-		}
-	} else {
-		fg.haveGetFuncIP = true
-	}
-
-	if fg.kretOffset, err = fg.detectRetOffset(); err != nil {
+	fg.haveGetFuncIP = sysinfo.HaveGetFuncIP()
+	var err error
+	if fg.kretOffset, err = sysinfo.DetectRetOffset(); err != nil {
 		return err
 	}
-	fg.detectKprobeMulti()
+
+	fg.haveKprobeMulti = sysinfo.HaveKprobeMulti()
 
 	fmt.Printf("haveGetFuncIP: %v\nretOffset: %v\nhaveKprobeMulti:%v\n", fg.haveGetFuncIP, fg.kretOffset, fg.haveKprobeMulti)
 
 	return nil
-}
-
-func (fg *FuncGraph) detectKprobeMulti() {
-
-	prog, err := ebpf.NewProgram(&ebpf.ProgramSpec{
-		Name: "probe_kpm_link",
-		Type: ebpf.Kprobe,
-		Instructions: asm.Instructions{
-			asm.Mov.Imm(asm.R0, 0),
-			asm.Return(),
-		},
-		AttachType: ebpf.AttachTraceKprobeMulti,
-		License:    "MIT",
-	})
-
-	if err != nil {
-		return
-	}
-	defer prog.Close()
-
-	opts := link.KprobeMultiOptions{
-		Symbols: []string{"vprintk"},
-	}
-
-	kp, err := link.KprobeMulti(prog, opts)
-	if err != nil {
-		return
-	}
-	defer kp.Close()
-	fg.haveKprobeMulti = true
-}
-
-func (fg *FuncGraph) detectRetOffset() (uint64, error) {
-	fakeObjs := fakeObjects{}
-	if err := loadFakeObjects(&fakeObjs, nil); err != nil {
-		return 0, fmt.Errorf("loading fakeobjects: %w", err)
-	}
-	defer fakeObjs.Close()
-
-	fakeKp, err := link.Kprobe("sys_nanosleep", fakeObjs.Funcentry, nil)
-	if err != nil {
-		return 0, fmt.Errorf("opening kprobe sys_nanosleep: %w", err)
-	}
-	defer fakeKp.Close()
-
-	fakeKpRet, err := link.Kretprobe("sys_nanosleep", fakeObjs.Funcret, nil)
-	if err != nil {
-		return 0, fmt.Errorf("opening kretprobe sys_nanosleep: %w", err)
-	}
-	defer fakeKpRet.Close()
-
-	t := unix.Timespec{
-		Sec:  0,
-		Nsec: 1000,
-	}
-	unix.Nanosleep(&t, nil)
-
-	for {
-		e := unix.Nanosleep(&t, nil)
-		if e == nil {
-			break
-		}
-		if e == syscall.EINTR {
-			continue
-		}
-	}
-	key := uint64(0)
-	value := uint64(0)
-	if err := fakeObjs.RetOffset.Lookup(&key, &value); err != nil {
-		return 0, fmt.Errorf("RetOffset map lookup: %w", err)
-	}
-	return value, nil
 }
 
 func (fg *FuncGraph) showStats() {
@@ -1276,10 +1193,11 @@ func (fg *FuncGraph) ShowFuncRet(e *FuncEvent) {
 func main() {
 	cli.AppHelpTemplate = fmt.Sprintf(`%s
 EXAMPLES:
-	./efunc info "ip_rcv"
-	./efunc info "ip_rcv(*skb, skb->len, skb->dev.name)"
-	./efunc trace -e "ip_rcv(skb->len)" -a ":net/ipv4/*" -a "virtio_net:*"	
-	./efunc trace -e "tcp_v4_rcv(skb,(struct tcphdr *)skb->data,(struct tcphdr *)(1,0,0,0)->syn == 1)"
+	efunc info
+	efunc debug "ip_rcv"
+	efunc debug "ip_rcv(*skb, skb->len, skb->dev.name)"
+	efunc trace -e "ip_rcv(skb->len)" -a ":net/ipv4/*" -a "virtio_net:*"	
+	efunc trace -e "tcp_v4_rcv(skb,(struct tcphdr *)skb->data,(struct tcphdr *)(1,0,0,0)->syn == 1)"
 
 ENVIRONMENT:
 	BTF_SHOW_ZERO		[default: 0] show field info even value is zero
@@ -1289,7 +1207,7 @@ ENVIRONMENT:
 		Version: "0.0.5",
 		Commands: []*cli.Command{
 			{
-				Name:  "info",
+				Name:  "debug",
 				Usage: "parse func expr and generate trace data",
 				Action: func(cCtx *cli.Context) error {
 					fn := cCtx.Args().First()
@@ -1319,6 +1237,18 @@ ENVIRONMENT:
 						return fmt.Errorf("expect function but got %+v", typ)
 					}
 
+					return nil
+				},
+			},
+			{
+				Name:  "info",
+				Usage: "show system info and detected ebpf feature",
+				Action: func(cCtx *cli.Context) error {
+					i, err := sysinfo.ShowSysInfo()
+					if err != nil {
+						return err
+					}
+					fmt.Println(i)
 					return nil
 				},
 			},

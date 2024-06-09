@@ -40,7 +40,7 @@ int funcret(struct pt_regs *ctx) {
         if (entry_ip != 0 && ip == entry_ip) {
             u64 key = 0;
             u64 value = i;
-            bpf_printk("nanosleep entry_ip=%llx idx=%llx", entry_ip, i);
+            // bpf_printk("nanosleep entry_ip=%llx idx=%llx", entry_ip, i);
             bpf_map_update_elem(&ret_offset, &key, &value, BPF_ANY);
             return 0;
         }
