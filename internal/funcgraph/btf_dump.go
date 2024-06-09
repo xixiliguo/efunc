@@ -1,4 +1,4 @@
-package main
+package funcgraph
 
 import (
 	"bytes"
@@ -291,7 +291,7 @@ var baseSpec = sync.OnceValues[*btf.Spec, error](func() (*btf.Spec, error) {
 	return btf.LoadKernelSpec()
 })
 
-func loadbtfSpec(mod string) (*btf.Spec, error) {
+func LoadbtfSpec(mod string) (*btf.Spec, error) {
 
 	if mod == "" || mod == "vmlinux" {
 		return baseSpec()

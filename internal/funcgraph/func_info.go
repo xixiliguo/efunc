@@ -1,4 +1,4 @@
-package main
+package funcgraph
 
 import (
 	"fmt"
@@ -84,7 +84,7 @@ type TraceData struct {
 	S_target    int64
 }
 
-func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
+func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 	fmt.Printf("generate TraceData of %+v with %+v\n", dataExpr, fn)
 	t := &TraceData{}
 	var btfData btf.Type
@@ -124,7 +124,7 @@ func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 		t.Imm = dataExpr.First.Addr.Imm
 		t.onEntry = true
 
-		spec, err := loadbtfSpec("")
+		spec, err := LoadbtfSpec("")
 		if err != nil {
 			fmt.Printf("loadbtfSpec: %s\n", err)
 			os.Exit(1)
@@ -153,7 +153,7 @@ func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 
 		if dataExpr.Typ != "" {
 			if _, ok := t.Typ.(*btf.Pointer); ok {
-				spec, err := loadbtfSpec("")
+				spec, err := LoadbtfSpec("")
 				if err != nil {
 					fmt.Printf("loadbtfSpec: %s\n", err)
 					os.Exit(1)
@@ -372,7 +372,7 @@ func ParseFuncWithPara(s string) (*FuncExpr, error) {
 	return p.ParseString("", s)
 }
 
-func showBtfFunc(fn *btf.Func) (s string) {
+func ShowBtfFunc(fn *btf.Func) (s string) {
 	if proto, ok := fn.Type.(*btf.FuncProto); ok {
 		s = typToString(proto.Return)
 		s += fmt.Sprintf(" %s(", fn.Name)

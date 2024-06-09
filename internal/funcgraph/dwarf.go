@@ -1,4 +1,4 @@
-package main
+package funcgraph
 
 import (
 	"debug/dwarf"
@@ -56,7 +56,7 @@ var dwarfData = sync.OnceValue[*dwarf.Data](func() *dwarf.Data {
 	return dwarfData
 })
 
-func funcsFromFile(pattern string) map[Symbol]struct{} {
+func FuncsFromFile(pattern string) map[Symbol]struct{} {
 	funcs := make(map[Symbol]struct{})
 	data := dwarfData()
 	if data == nil {
