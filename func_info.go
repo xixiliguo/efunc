@@ -236,8 +236,23 @@ func genTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 				fmt.Printf("%s fail to ParseUint: %s\n", *target, err)
 				os.Exit(1)
 			}
+		case *btf.Enum:
+			if typ.Signed {
+				t.isSign = true
+			}
+			if target := dataExpr.CompareInfo.Threshold.String; target != nil {
+				for i := 0; i < len(typ.Values); i++ {
+					if *target == typ.Values[i].Name {
+						if t.isSign {
+							t.S_target = int64(typ.Values[i].Value)
+						} else {
+							t.Target = typ.Values[i].Value
+						}
+					}
+				}
+			}
 		default:
-			fmt.Printf("%s do not support cmp now\n", typ)
+			fmt.Printf("%+v do not support cmp now\n", typ)
 			os.Exit(1)
 		}
 
