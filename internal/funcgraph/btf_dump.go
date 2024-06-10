@@ -37,7 +37,7 @@ func NewDumpOption() (*dumpOption, error) {
 		isStr:          false,
 		level:          0,
 		showZero:       isShow,
-		ksyms:          &k,
+		ksyms:          k,
 		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
 		typStringCache: make(map[btf.Type]string),
 		typSizeCache:   make(map[btf.Type]int),
@@ -256,7 +256,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		msg = strconv.AppendUint(msg, p, 16)
 		opt.WriteStrings(space, name, connector, "(", opt.typString(t), ")", "0x", toString(msg), " ")
 		if p != 0 {
-			if sym := opt.ksyms.SymbolByAddr(p, true); sym.Name != "" {
+			if sym := opt.ksyms.SymbolByAddr(p); sym.Addr == p {
 				opt.WriteStrings("<", sym.Name, ">")
 			}
 		}

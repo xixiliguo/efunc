@@ -13,6 +13,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type SymbolType int
+
+const (
+	FuncType SymbolType = iota
+	NonFuncType
+)
+
+type Symbol struct {
+	Addr   uint64
+	Type   SymbolType
+	Name   string
+	Module string
+}
+
 func fsType(path string) (int64, error) {
 	var statfs unix.Statfs_t
 	if err := unix.Statfs(path, &statfs); err != nil {
@@ -49,7 +63,7 @@ var availKprobeSymbol = sync.OnceValue[map[Symbol]struct{}](func() map[Symbol]st
 	syms := make(map[Symbol]struct{})
 	b, err := os.ReadFile(path + "/available_filter_functions")
 	if err != nil {
-		return nil
+		return syms
 	}
 	scanner := bufio.NewScanner(bytes.NewBuffer(b))
 	for scanner.Scan() {
@@ -68,47 +82,22 @@ var availKprobeSymbol = sync.OnceValue[map[Symbol]struct{}](func() map[Symbol]st
 		syms[symbol] = struct{}{}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil
+		return syms
 	}
 	return syms
 })
 
-func isAvailKprobeSymbol(s Symbol) bool {
-	syms := availKprobeSymbol()
-	_, ok := syms[Symbol{
-		Name:   s.Name,
-		Module: s.Module,
-	}]
-	return ok
-}
-
-type SymbolType int
-
-const (
-	FuncType SymbolType = iota
-	NonFuncType
-)
-
-type Symbol struct {
-	Addr   uint64
-	Type   SymbolType
-	Name   string
-	Module string
-}
-
 type KSymCache struct {
-	syms        []Symbol
-	addrToSym   map[uint64]Symbol
-	resultCache map[uint64]Symbol
-	dups        map[string]int
+	syms  []Symbol
+	cache map[uint64]Symbol
+	dups  map[string]int
 }
 
-func NewKSymCache() (KSymCache, error) {
-	k := KSymCache{
-		syms:        []Symbol{},
-		addrToSym:   make(map[uint64]Symbol),
-		resultCache: make(map[uint64]Symbol),
-		dups:        make(map[string]int),
+func NewKSymCache() (*KSymCache, error) {
+	k := &KSymCache{
+		syms:  []Symbol{},
+		cache: make(map[uint64]Symbol),
+		dups:  make(map[string]int),
 	}
 	b, err := os.ReadFile("/proc/kallsyms")
 	if err != nil {
@@ -137,9 +126,6 @@ func NewKSymCache() (KSymCache, error) {
 			Module: m,
 		}
 		k.syms = append(k.syms, sym)
-		if _, ok := k.addrToSym[sym.Addr]; !ok {
-			k.addrToSym[sym.Addr] = sym
-		}
 		k.dups[sym.Module+sym.Name]++
 	}
 	if err := scanner.Err(); err != nil {
@@ -152,52 +138,51 @@ func NewKSymCache() (KSymCache, error) {
 	return k, nil
 }
 
-func (k KSymCache) SymbolByAddr(addr uint64, mustMatch bool) Symbol {
+func (k *KSymCache) SymbolByAddr(addr uint64) Symbol {
 
-	if mustMatch {
-		return k.addrToSym[addr]
-	}
-
-	if s, ok := k.resultCache[addr]; ok {
+	if s, ok := k.cache[addr]; ok {
 		return s
 	}
 
 	idx := sort.Search(len(k.syms), func(i int) bool {
-		return k.syms[i].Addr > addr
+		return k.syms[i].Addr >= addr
 	})
 	if idx == 0 {
-		k.resultCache[addr] = Symbol{}
-		return Symbol{}
+		k.cache[addr] = Symbol{}
+		return k.cache[addr]
 	}
-	k.resultCache[addr] = k.syms[idx-1]
-	return k.syms[idx-1]
+	if idx < len(k.syms) && k.syms[idx].Addr == addr {
+		k.cache[addr] = k.syms[idx]
+		return k.cache[addr]
+	}
+	k.cache[addr] = k.syms[idx-1]
+	return k.cache[addr]
 }
 
-func (k KSymCache) Iterate() *SymsIterator {
-	return &SymsIterator{syms: k.syms, dups: k.dups}
+func (k *KSymCache) Iterate() *SymsIterator {
+	return &SymsIterator{k: k}
 }
 
 type SymsIterator struct {
-	Symbol
-	syms  []Symbol
-	dups  map[string]int
+	k     *KSymCache
 	index int
+	Symbol
 }
 
 func (iter *SymsIterator) Next() bool {
-	for iter.index < len(iter.syms) {
-		sym := iter.syms[iter.index]
-		if iter.dups[sym.Module+sym.Name] <= 1 {
+	for iter.index < len(iter.k.syms) {
+		sym := iter.k.syms[iter.index]
+		if iter.k.dups[sym.Module+sym.Name] <= 1 {
 			break
 		} else {
 			iter.index++
 		}
 	}
 
-	if len(iter.syms) <= iter.index {
+	if iter.index >= len(iter.k.syms) {
 		return false
 	}
-	iter.Symbol = iter.syms[iter.index]
+	iter.Symbol = iter.k.syms[iter.index]
 	iter.index++
 	return true
 }

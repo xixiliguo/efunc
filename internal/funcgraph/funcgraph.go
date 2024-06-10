@@ -114,7 +114,7 @@ type FuncGraph struct {
 	allow_comm_cnt  uint32
 	deny_comm_cnt   uint32
 	comms           map[[16]uint8]bool
-	ksyms           KSymCache
+	ksyms           *KSymCache
 	haveKprobeMulti bool
 	haveGetFuncIP   bool
 	kretOffset      uint64
@@ -323,7 +323,10 @@ func (fg *FuncGraph) parseOption(opt Option) error {
 	iter := ksyms.Iterate()
 	for iter.Next() {
 		sym := iter.Symbol
-		if !isAvailKprobeSymbol(sym) {
+		if _, ok := availKprobeSymbol()[Symbol{
+			Name:   sym.Name,
+			Module: sym.Module,
+		}]; !ok {
 			continue
 		}
 
@@ -884,7 +887,7 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 		if addr == 0 {
 			break
 		}
-		sym := fg.ksyms.SymbolByAddr(addr, false)
+		sym := fg.ksyms.SymbolByAddr(addr)
 		mod := ""
 		if sym.Module != "" {
 			mod = "[" + sym.Module + "]"
@@ -934,7 +937,7 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 
 		funcInfo := fg.idToFuncs[btf.TypeID(e.Id)]
 		if e.Id == 0 {
-			sym := fg.ksyms.SymbolByAddr(e.Ip, true)
+			sym := fg.ksyms.SymbolByAddr(e.Ip)
 			funcInfo.Symbol = sym
 		}
 		sym := funcInfo.Symbol
