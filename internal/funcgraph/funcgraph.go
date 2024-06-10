@@ -99,6 +99,23 @@ func (es *FuncEvents) Reset() {
 	*es = (*es)[:0]
 }
 
+var defaultDenyFuncs = []string{
+	"bpf_get_*",
+	"bpf_probe_read_*",
+	"bpf_map_*",
+	"bpf_ringbuf_*",
+	"bpf_ktime_get_ns",
+	"*migrate*",
+	"rcu_read_lock*",
+	"rcu_read_unlock*",
+	"bpf_lsm_*",
+	"check_cfs_rq_runtime",
+	"find_busiest_group",
+	"find_vma*",
+	"btf_sec_info_cmp",
+	"copy_to_user_nofault",
+}
+
 type FuncGraph struct {
 	funcs           []FuncInfo
 	links           []link.Link
@@ -136,7 +153,9 @@ type FuncGraph struct {
 	duration        uint64
 }
 
-func NewFuncGraph(opt Option) (*FuncGraph, error) {
+func NewFuncGraph(opt *Option) (*FuncGraph, error) {
+
+	opt.DenyFuncs = append(opt.DenyFuncs, defaultDenyFuncs...)
 	fg := &FuncGraph{
 		verbose:        opt.Verbose,
 		bpfLog:         opt.BpfLog,
@@ -299,7 +318,7 @@ func (fg *FuncGraph) findBTFInfo(sym Symbol) (btf.TypeID, *btf.Func) {
 	return id, info
 }
 
-func (fg *FuncGraph) parseOption(opt Option) error {
+func (fg *FuncGraph) parseOption(opt *Option) error {
 
 	if opt.Target != "" {
 		go fg.startCmd(opt.Target, fg.targetCmdRecv, fg.targetCmdSend)

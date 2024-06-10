@@ -284,7 +284,7 @@ ENVIRONMENT:
 						Duration:          ctx.Uint64("duration"),
 					}
 
-					fg, err := funcgraph.NewFuncGraph(opt)
+					fg, err := funcgraph.NewFuncGraph(&opt)
 					if err != nil {
 						return err
 					}
