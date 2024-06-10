@@ -93,7 +93,12 @@ type KSymCache struct {
 	dups  map[string]int
 }
 
+var kcache *KSymCache
+
 func NewKSymCache() (*KSymCache, error) {
+	if kcache != nil {
+		return kcache, nil
+	}
 	k := &KSymCache{
 		syms:  []Symbol{},
 		cache: make(map[uint64]Symbol),
@@ -134,8 +139,8 @@ func NewKSymCache() (*KSymCache, error) {
 	sort.Slice(k.syms, func(i, j int) bool {
 		return k.syms[i].Addr < k.syms[j].Addr
 	})
-
-	return k, nil
+	kcache = k
+	return kcache, nil
 }
 
 func (k *KSymCache) SymbolByAddr(addr uint64) Symbol {
