@@ -320,12 +320,12 @@ func LoadbtfSpec(mod string) (*btf.Spec, error) {
 
 }
 
-func toBytes(s string) []byte {
-	if len(s) == 0 {
-		return nil
-	}
-	return unsafe.Slice(unsafe.StringData(s), len(s))
-}
+// func toBytes(s string) []byte {
+// 	if len(s) == 0 {
+// 		return nil
+// 	}
+// 	return unsafe.Slice(unsafe.StringData(s), len(s))
+// }
 
 func toString(b []byte) string {
 	if len(b) == 0 {
