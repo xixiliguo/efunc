@@ -241,6 +241,12 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 					isEntry[idx] = false
 				}
 			}
+			if len(fn.trace) > 5 {
+				fn.trace = fn.trace[:5]
+			}
+			if len(fn.retTrace) > 5 {
+				fn.retTrace = fn.retTrace[:5]
+			}
 			return fn, true
 		}
 	}
