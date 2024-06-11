@@ -300,8 +300,12 @@ static __always_inline void extract_trace_data(struct func_entry_event *e,
                     if (t.scale != 0 && t.index < i) {
                         u16 bi = t.index * MAX_TRACE_DATA;
                         u64 i = 0;
-                        bpf_probe_read_kernel(&i, 8, &e->buf[bi]);
-                        data = i * t.scale;
+                        u16 sz = fn->trace[t.index].size;
+                        if (sz > 8) {
+                            continue;
+                        }
+                        bpf_probe_read_kernel(&i, sz, &e->buf[bi]);
+                        data += i * t.scale;
                     }
                 } else {
                     continue;
