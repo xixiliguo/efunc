@@ -1011,7 +1011,6 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 					fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(10+e.Depth))
 					fg.opt.dumpDataByBTF(t.Name, t.Typ, 0, int(t.BitOff), int(t.BitSize))
 					fg.buf.WriteString(fg.opt.String())
-					fg.buf.WriteString("\n")
 				}
 
 				for idx, t := range funcInfo.retTrace {
