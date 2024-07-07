@@ -307,6 +307,9 @@ static __always_inline void extract_trace_data(struct func_entry_event *e,
                         bpf_probe_read_kernel(&i, sz, &e->buf[bi]);
                         data += i * t.scale;
                     }
+                    if (t.imm != 0) {
+                        data += t.imm;
+                    }
                 } else {
                     continue;
                 }

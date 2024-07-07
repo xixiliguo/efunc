@@ -20,12 +20,17 @@ type FuncExpr struct {
 }
 
 type DataExpr struct {
-	Dereference bool    `parser:"@DereferenceOperator?"`
-	Typ         string  `parser:"(LeftEdge Struct Whitespace @Ident Whitespace DereferenceOperator RightEdge)?"`
-	First       Primary `parser:"@@"`
-	Fields      []Field `parser:"@@*"`
-	SohwString  bool    `parser:"@ShowString?"`
-	CompareInfo Compare `parser:"@@?"`
+	Dereference bool     `parser:"@DereferenceOperator?"`
+	Typ         CastType `parser:"(LeftEdge Struct Whitespace @@ Whitespace DereferenceOperator RightEdge)?"`
+	First       Primary  `parser:"@@"`
+	Fields      []Field  `parser:"@@*"`
+	SohwString  bool     `parser:"@ShowString?"`
+	CompareInfo Compare  `parser:"@@?"`
+}
+
+type CastType struct {
+	Moudle string `parser:"(@Ident Colon)?"`
+	Name   string `parser:"@Ident"`
 }
 
 type Primary struct {
@@ -112,11 +117,14 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 		}
 
 	} else {
-		t.Name = fmt.Sprintf("(struct %s *)(%d,%d,%d,%d)", dataExpr.Typ,
+		t.Name = fmt.Sprintf("(struct %s *)(%d,%d,%d,%d)", dataExpr.Typ.Name,
 			dataExpr.First.Addr.Base,
 			dataExpr.First.Addr.Index,
 			dataExpr.First.Addr.Scale,
 			dataExpr.First.Addr.Imm)
+		if len(dataExpr.Fields) != 0 {
+			t.Name = "(" + t.Name + ")"
+		}
 		t.BaseAddr = true
 		t.Base = dataExpr.First.Addr.Base
 		t.Index = dataExpr.First.Addr.Index
@@ -124,13 +132,13 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 		t.Imm = dataExpr.First.Addr.Imm
 		t.onEntry = true
 
-		spec, err := LoadbtfSpec("")
+		spec, err := LoadbtfSpec(dataExpr.Typ.Moudle)
 		if err != nil {
 			fmt.Printf("loadbtfSpec: %s\n", err)
 			os.Exit(1)
 		}
 		structPtr := &btf.Struct{}
-		err = spec.TypeByName(dataExpr.Typ, &structPtr)
+		err = spec.TypeByName(dataExpr.Typ.Name, &structPtr)
 		if err != nil {
 			fmt.Printf("TypeByName %s: %s\n", dataExpr.Typ, err)
 			os.Exit(1)
@@ -142,7 +150,7 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 		t.Typ = pointer
 		t.Size = 8
 		btfData = pointer
-		dataExpr.Typ = ""
+		dataExpr.Typ.Name = ""
 	}
 
 	fmt.Println(dataExpr.First, btfData)
@@ -151,15 +159,15 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 
 		genTraceDataByField(dataExpr.Fields, 0, btfData, t)
 
-		if dataExpr.Typ != "" {
+		if dataExpr.Typ.Name != "" {
 			if _, ok := t.Typ.(*btf.Pointer); ok {
-				spec, err := LoadbtfSpec("")
+				spec, err := LoadbtfSpec(dataExpr.Typ.Moudle)
 				if err != nil {
 					fmt.Printf("loadbtfSpec: %s\n", err)
 					os.Exit(1)
 				}
 				structPtr := &btf.Struct{}
-				err = spec.TypeByName(dataExpr.Typ, &structPtr)
+				err = spec.TypeByName(dataExpr.Typ.Name, &structPtr)
 				if err != nil {
 					fmt.Printf("TypeByName %s: %s\n", dataExpr.Typ, err)
 					os.Exit(1)
