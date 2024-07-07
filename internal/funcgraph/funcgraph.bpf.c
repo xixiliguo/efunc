@@ -389,266 +389,139 @@ static __always_inline bool ret_trace_have_filter_expr(struct func *fn) {
     return false;
 }
 
-static __always_inline bool ret_trace_data_allowed(struct func_ret_event *e,
-                                               struct func *fn) {
-    bool verdict = false;
-    u8 cmp_cnt = 0;
-    u8 cmp_cnt_allowed = 0;
+static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn, bool ret) {
 
-    for (int i = 0; i < fn->ret_trace_cnt && i < MAX_TRACES; i++) {
-
-        u64 src_data = 0;
-        s64 s_src_data = 0;
-        struct trace_data t = fn->ret_trace[i];
-
-        if (t.cmp_operator == CMP_NOP) {
-            continue;
-        }
-
-        u16 off = i * MAX_TRACE_DATA;
-
-        if (t.bitSize != 0) {
-            u64 num = 0;
-
-            if (t.size == 1) {
-                num = *(u8 *)&e->buf[off];
-            }
-            if (t.size == 2) {
-                num = *(u16 *)&e->buf[off];
-            }
-            if (t.size == 4) {
-                num = *(u32 *)&e->buf[off];
-            }
-            if (t.size == 8) {
-                num = *(u64 *)&e->buf[off];
-            }
-
-            u32 left = 64 - t.bitOff - t.bitSize;
-            u32 right = 64 - t.bitSize;
-            num = (num << (u64)left) >> (u64)right;
-
-            if (!t.is_sign) {
-                src_data = (u64)num;
-            } else {
-                s_src_data = (s64)num;
-            }
-        } else {
-            if (!t.is_sign) {
-                if (t.size == 1) {
-                    src_data = *(u8 *)&e->buf[off];
-                }
-                if (t.size == 2) {
-                    src_data = *(u16 *)&e->buf[off];
-                }
-                if (t.size == 4) {
-                    src_data = *(u32 *)&e->buf[off];
-                }
-                if (t.size == 8) {
-                    src_data = *(u64 *)&e->buf[off];
-                }
-            }
-
-            if (t.is_sign) {
-                if (t.size == 1) {
-                    s_src_data = *(s8 *)&e->buf[off];
-                }
-                if (t.size == 2) {
-                    s_src_data = *(s16 *)&e->buf[off];
-                }
-                if (t.size == 4) {
-                    s_src_data = *(s32 *)&e->buf[off];
-                }
-                if (t.size == 8) {
-                    s_src_data = *(s64 *)&e->buf[off];
-                }
-            }
-        }
-
-        cmp_cnt++;
-
-        if (!t.is_sign && t.cmp_operator == CMP_EQ && src_data == t.target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t.is_sign && t.cmp_operator == CMP_NOTEQ && src_data != t.target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t.is_sign && t.cmp_operator == CMP_GT && src_data > t.target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t.is_sign && t.cmp_operator == CMP_GE && src_data >= t.target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t.is_sign && t.cmp_operator == CMP_LT && src_data < t.target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t.is_sign == false && t.cmp_operator == CMP_LE &&
-            src_data <= t.target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-
-        if (t.is_sign && t.cmp_operator == CMP_EQ && s_src_data == t.s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (t.is_sign && t.cmp_operator == CMP_NOTEQ &&
-            s_src_data != t.s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (t.is_sign && t.cmp_operator == CMP_GT && s_src_data > t.s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (t.is_sign && t.cmp_operator == CMP_GE && s_src_data >= t.s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (t.is_sign && t.cmp_operator == CMP_LT && s_src_data < t.s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (t.is_sign == false && t.cmp_operator == CMP_LE &&
-            s_src_data <= t.s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
+    u8 trace_cnt = fn->trace_cnt;
+    struct trace_data *tp = fn->trace;
+    if (ret) {
+        trace_cnt = fn->ret_trace_cnt;
+        tp = fn->ret_trace;
     }
 
-    return cmp_cnt == cmp_cnt_allowed;
-}
-
-static __always_inline bool trace_data_allowed(struct func_entry_event *e,
-                                               struct func *fn) {
     bool verdict = false;
     u8 cmp_cnt = 0;
     u8 cmp_cnt_allowed = 0;
 
-    for (int i = 0; i < fn->trace_cnt && i < MAX_TRACES; i++) {
+    for (int i = 0; i < trace_cnt && i < MAX_TRACES; i++) {
 
         u64 src_data = 0;
         s64 s_src_data = 0;
-        struct trace_data t = fn->trace[i];
+        struct trace_data *t = tp + i;
 
-        if (t.cmp_operator == CMP_NOP) {
+        if (t->cmp_operator == CMP_NOP) {
             continue;
         }
 
         u16 off = i * MAX_TRACE_DATA;
 
-        if (t.bitSize != 0) {
+        if (t->bitSize != 0) {
             u64 num = 0;
 
-            if (t.size == 1) {
-                num = *(u8 *)&e->buf[off];
+            if (t->size == 1) {
+                num = *(u8 *)&buf[off];
             }
-            if (t.size == 2) {
-                num = *(u16 *)&e->buf[off];
+            if (t->size == 2) {
+                num = *(u16 *)&buf[off];
             }
-            if (t.size == 4) {
-                num = *(u32 *)&e->buf[off];
+            if (t->size == 4) {
+                num = *(u32 *)&buf[off];
             }
-            if (t.size == 8) {
-                num = *(u64 *)&e->buf[off];
+            if (t->size == 8) {
+                num = *(u64 *)&buf[off];
             }
 
-            u32 left = 64 - t.bitOff - t.bitSize;
-            u32 right = 64 - t.bitSize;
+            u32 left = 64 - t->bitOff - t->bitSize;
+            u32 right = 64 - t->bitSize;
             num = (num << (u64)left) >> (u64)right;
 
-            if (!t.is_sign) {
+            if (!t->is_sign) {
                 src_data = (u64)num;
             } else {
                 s_src_data = (s64)num;
             }
         } else {
-            if (!t.is_sign) {
-                if (t.size == 1) {
-                    src_data = *(u8 *)&e->buf[off];
+            if (!t->is_sign) {
+                if (t->size == 1) {
+                    src_data = *(u8 *)&buf[off];
                 }
-                if (t.size == 2) {
-                    src_data = *(u16 *)&e->buf[off];
+                if (t->size == 2) {
+                    src_data = *(u16 *)&buf[off];
                 }
-                if (t.size == 4) {
-                    src_data = *(u32 *)&e->buf[off];
+                if (t->size == 4) {
+                    src_data = *(u32 *)&buf[off];
                 }
-                if (t.size == 8) {
-                    src_data = *(u64 *)&e->buf[off];
+                if (t->size == 8) {
+                    src_data = *(u64 *)&buf[off];
                 }
             }
 
-            if (t.is_sign) {
-                if (t.size == 1) {
-                    s_src_data = *(s8 *)&e->buf[off];
+            if (t->is_sign) {
+                if (t->size == 1) {
+                    s_src_data = *(s8 *)&buf[off];
                 }
-                if (t.size == 2) {
-                    s_src_data = *(s16 *)&e->buf[off];
+                if (t->size == 2) {
+                    s_src_data = *(s16 *)&buf[off];
                 }
-                if (t.size == 4) {
-                    s_src_data = *(s32 *)&e->buf[off];
+                if (t->size == 4) {
+                    s_src_data = *(s32 *)&buf[off];
                 }
-                if (t.size == 8) {
-                    s_src_data = *(s64 *)&e->buf[off];
+                if (t->size == 8) {
+                    s_src_data = *(s64 *)&buf[off];
                 }
             }
         }
 
         cmp_cnt++;
 
-        if (!t.is_sign && t.cmp_operator == CMP_EQ && src_data == t.target) {
+        if (!t->is_sign && t->cmp_operator == CMP_EQ && src_data == t->target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (!t.is_sign && t.cmp_operator == CMP_NOTEQ && src_data != t.target) {
+        if (!t->is_sign && t->cmp_operator == CMP_NOTEQ && src_data != t->target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (!t.is_sign && t.cmp_operator == CMP_GT && src_data > t.target) {
+        if (!t->is_sign && t->cmp_operator == CMP_GT && src_data > t->target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (!t.is_sign && t.cmp_operator == CMP_GE && src_data >= t.target) {
+        if (!t->is_sign && t->cmp_operator == CMP_GE && src_data >= t->target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (!t.is_sign && t.cmp_operator == CMP_LT && src_data < t.target) {
+        if (!t->is_sign && t->cmp_operator == CMP_LT && src_data < t->target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (!t.is_sign == false && t.cmp_operator == CMP_LE &&
-            src_data <= t.target) {
+        if (!t->is_sign == false && t->cmp_operator == CMP_LE &&
+            src_data <= t->target) {
             cmp_cnt_allowed++;
             continue;
         }
 
-        if (t.is_sign && t.cmp_operator == CMP_EQ && s_src_data == t.s_target) {
+        if (t->is_sign && t->cmp_operator == CMP_EQ && s_src_data == t->s_target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (t.is_sign && t.cmp_operator == CMP_NOTEQ &&
-            s_src_data != t.s_target) {
+        if (t->is_sign && t->cmp_operator == CMP_NOTEQ &&
+            s_src_data != t->s_target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (t.is_sign && t.cmp_operator == CMP_GT && s_src_data > t.s_target) {
+        if (t->is_sign && t->cmp_operator == CMP_GT && s_src_data > t->s_target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (t.is_sign && t.cmp_operator == CMP_GE && s_src_data >= t.s_target) {
+        if (t->is_sign && t->cmp_operator == CMP_GE && s_src_data >= t->s_target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (t.is_sign && t.cmp_operator == CMP_LT && s_src_data < t.s_target) {
+        if (t->is_sign && t->cmp_operator == CMP_LT && s_src_data < t->s_target) {
             cmp_cnt_allowed++;
             continue;
         }
-        if (t.is_sign == false && t.cmp_operator == CMP_LE &&
-            s_src_data <= t.s_target) {
+        if (t->is_sign == false && t->cmp_operator == CMP_LE &&
+            s_src_data <= t->s_target) {
             cmp_cnt_allowed++;
             continue;
         }
@@ -709,7 +582,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
                 extract_func_paras(entry_info, ctx);
                 entry_info->have_data = true;
                 extract_trace_data(entry_info, fn);
-                if (trace_data_allowed(entry_info, fn) == false) {
+                if (trace_data_allowed(entry_info->buf, fn, false) == false) {
                     if (verbose) {
                         bpf_printk(
                             "func %s will not be traced since it was filtered",
@@ -937,7 +810,7 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
             ret_info->ret = PT_REGS_RC(ctx);
             ret_info->have_data = true;
             extract_ret_trace_data(ret_info, fn);
-            if (d == 0 && ret_trace_have_filter_expr(fn) && ret_trace_data_allowed(ret_info,fn) == false) {
+            if (d == 0 && ret_trace_have_filter_expr(fn) && trace_data_allowed(ret_info->buf,fn,true) == false) {
                 skip = true;
             }
             bpf_ringbuf_submit(ret_info, 0);
