@@ -393,11 +393,17 @@ static __always_inline bool ret_trace_data_allowed(struct func_ret_event *e,
                                                struct func *fn) {
     bool verdict = false;
     u8 cmp_cnt = 0;
+    u8 cmp_cnt_allowed = 0;
 
     for (int i = 0; i < fn->ret_trace_cnt && i < MAX_TRACES; i++) {
+
         u64 src_data = 0;
         s64 s_src_data = 0;
         struct trace_data t = fn->ret_trace[i];
+
+        if (t.cmp_operator == CMP_NOP) {
+            continue;
+        }
 
         u16 off = i * MAX_TRACE_DATA;
 
@@ -458,82 +464,80 @@ static __always_inline bool ret_trace_data_allowed(struct func_ret_event *e,
             }
         }
 
-        if (t.cmp_operator == CMP_NOP) {
-            continue;
-        }
-
         cmp_cnt++;
 
         if (!t.is_sign && t.cmp_operator == CMP_EQ && src_data == t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign && t.cmp_operator == CMP_NOTEQ && src_data != t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign && t.cmp_operator == CMP_GT && src_data > t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign && t.cmp_operator == CMP_GE && src_data >= t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign && t.cmp_operator == CMP_LT && src_data < t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign == false && t.cmp_operator == CMP_LE &&
             src_data <= t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
 
         if (t.is_sign && t.cmp_operator == CMP_EQ && s_src_data == t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign && t.cmp_operator == CMP_NOTEQ &&
             s_src_data != t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign && t.cmp_operator == CMP_GT && s_src_data > t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign && t.cmp_operator == CMP_GE && s_src_data >= t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign && t.cmp_operator == CMP_LT && s_src_data < t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign == false && t.cmp_operator == CMP_LE &&
             s_src_data <= t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
     }
 
-    if (cmp_cnt == 0) {
-        return true;
-    }
-
-    return verdict;
+    return cmp_cnt == cmp_cnt_allowed;
 }
 
 static __always_inline bool trace_data_allowed(struct func_entry_event *e,
                                                struct func *fn) {
     bool verdict = false;
     u8 cmp_cnt = 0;
+    u8 cmp_cnt_allowed = 0;
 
     for (int i = 0; i < fn->trace_cnt && i < MAX_TRACES; i++) {
+
         u64 src_data = 0;
         s64 s_src_data = 0;
         struct trace_data t = fn->trace[i];
+
+        if (t.cmp_operator == CMP_NOP) {
+            continue;
+        }
 
         u16 off = i * MAX_TRACE_DATA;
 
@@ -594,71 +598,63 @@ static __always_inline bool trace_data_allowed(struct func_entry_event *e,
             }
         }
 
-        if (t.cmp_operator == CMP_NOP) {
-            continue;
-        }
-
         cmp_cnt++;
 
         if (!t.is_sign && t.cmp_operator == CMP_EQ && src_data == t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign && t.cmp_operator == CMP_NOTEQ && src_data != t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign && t.cmp_operator == CMP_GT && src_data > t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign && t.cmp_operator == CMP_GE && src_data >= t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign && t.cmp_operator == CMP_LT && src_data < t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (!t.is_sign == false && t.cmp_operator == CMP_LE &&
             src_data <= t.target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
 
         if (t.is_sign && t.cmp_operator == CMP_EQ && s_src_data == t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign && t.cmp_operator == CMP_NOTEQ &&
             s_src_data != t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign && t.cmp_operator == CMP_GT && s_src_data > t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign && t.cmp_operator == CMP_GE && s_src_data >= t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign && t.cmp_operator == CMP_LT && s_src_data < t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
         if (t.is_sign == false && t.cmp_operator == CMP_LE &&
             s_src_data <= t.s_target) {
-            verdict = true;
-            break;
+            cmp_cnt_allowed++;
+            continue;
         }
     }
 
-    if (cmp_cnt == 0) {
-        return true;
-    }
-
-    return verdict;
+    return cmp_cnt == cmp_cnt_allowed;
 }
 
 static __always_inline void extract_func_paras(struct func_entry_event *e,
