@@ -55,10 +55,10 @@ volatile const u64 duration_ms = 0;
 struct trace_data {
     bool base_addr;
     u8 para;
-    u64 base;
-    u64 index;
-    u64 scale;
-    u64 imm;
+    u8 base;
+    u8 index;
+    s16 scale;
+    s16 imm;
     bool is_str;
     u8 field_cnt;
     u32 offsets[MAX_TRACE_FIELD_LEN];
@@ -295,21 +295,23 @@ static __always_inline void extract_trace_data(struct func_entry_event *e,
             u64 data = e->para[t.para];
             if (t.base_addr) {
                 if (t.base < i) {
+                    s64 addr =0;
                     u16 b = t.base * MAX_TRACE_DATA;
-                    bpf_probe_read_kernel(&data, 8, &e->buf[b]);
+                    bpf_probe_read_kernel(&addr, 8, &e->buf[b]);
                     if (t.scale != 0 && t.index < i) {
                         u16 bi = t.index * MAX_TRACE_DATA;
-                        u64 i = 0;
+                        s64 i = 0;
                         u16 sz = fn->trace[t.index].size;
                         if (sz > 8) {
                             continue;
                         }
                         bpf_probe_read_kernel(&i, sz, &e->buf[bi]);
-                        data += i * t.scale;
+                        addr += i * t.scale;
                     }
                     if (t.imm != 0) {
-                        data += t.imm;
+                        addr += t.imm;
                     }
+                    data = (u64)addr;
                 } else {
                     continue;
                 }

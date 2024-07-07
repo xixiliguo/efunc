@@ -39,10 +39,10 @@ type Primary struct {
 }
 
 type Addr struct {
-	Base  uint64 `parser:"@Number"`
-	Index uint64 `parser:"Separator @Number"`
-	Scale uint64 `parser:"Separator @Number"`
-	Imm   uint64 `parser:"Separator @Number"`
+	Base  uint8 `parser:"@Number"`
+	Index uint8 `parser:"Separator @Number"`
+	Scale int16 `parser:"Separator @Number"`
+	Imm   int16 `parser:"Separator @Number"`
 }
 
 type Field struct {
@@ -75,10 +75,10 @@ type TraceData struct {
 	Typ         btf.Type
 	BaseAddr    bool
 	Para        int
-	Base        uint64
-	Index       uint64
-	Scale       uint64
-	Imm         uint64
+	Base        uint8
+	Index       uint8
+	Scale       int16
+	Imm         int16
 	Offsets     []uint32
 	Size        int
 	BitOff      uint32
@@ -368,7 +368,7 @@ var funcParserFunc = sync.OnceValue[*participle.Parser[FuncExpr]](func() *partic
 		{Name: "RightEdge", Pattern: `\)`},
 		{Name: "Separator", Pattern: `,`},
 		{Name: "Operator", Pattern: `>=|>|==|!=|<=|<`},
-		{Name: "Number", Pattern: `(0x[a-zA-Z_0-9]+)|([-+]?\d+)`},
+		{Name: "Number", Pattern: `([-+]?0x[a-zA-Z_0-9]+)|([-+]?\d+)`},
 	})
 
 	parser, _ := participle.Build[FuncExpr](participle.Lexer(clexer))

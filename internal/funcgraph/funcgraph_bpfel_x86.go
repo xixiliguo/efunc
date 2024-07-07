@@ -89,11 +89,10 @@ type funcgraphStartEvent struct {
 type funcgraphTraceData struct {
 	BaseAddr    bool
 	Para        uint8
-	_           [6]byte
-	Base        uint64
-	Index       uint64
-	Scale       uint64
-	Imm         uint64
+	Base        uint8
+	Index       uint8
+	Scale       int16
+	Imm         int16
 	IsStr       bool
 	FieldCnt    uint8
 	_           [2]byte

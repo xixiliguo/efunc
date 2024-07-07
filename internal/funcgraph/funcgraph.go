@@ -228,8 +228,8 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 						}
 					}
 					t.onEntry = isEntry[t.Base]
-					t.Base = uint64(pos[t.Base])
-					t.Index = uint64(pos[t.Index])
+					t.Base = uint8(pos[t.Base])
+					t.Index = uint8(pos[t.Index])
 				}
 				if t.onEntry {
 					fn.trace = append(fn.trace, t)
