@@ -230,6 +230,16 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 					t.onEntry = isEntry[t.Base]
 					t.Base = uint8(pos[t.Base])
 					t.Index = uint8(pos[t.Index])
+					var baseType btf.Type
+					if t.onEntry {
+						baseType = fn.trace[t.Base].Typ
+					} else {
+						baseType = fn.retTrace[t.Base].Typ
+					}
+					if _, ok := baseType.(*btf.Pointer); !ok {
+						fmt.Printf("Base type is not pointer\n")
+						return FuncInfo{}, false
+					}
 				}
 				if t.onEntry {
 					fn.trace = append(fn.trace, t)
