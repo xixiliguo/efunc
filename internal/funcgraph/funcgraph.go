@@ -243,9 +243,11 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 			}
 			if len(fn.trace) > 5 {
 				fn.trace = fn.trace[:5]
+				fmt.Printf("current traceData exceed max 5 limit\n")
 			}
 			if len(fn.retTrace) > 5 {
 				fn.retTrace = fn.retTrace[:5]
+				fmt.Printf("current retTraceData exceed max 5 limit\n")
 			}
 			return fn, true
 		}
