@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unsafe"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
@@ -215,55 +216,62 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 	if dataExpr.CompareInfo.Operator != "" {
 		t.CmpOperator = convertCMPOp(dataExpr.CompareInfo.Operator)
 
-		switch typ := btf.UnderlyingType(t.Typ).(type) {
-		case *btf.Int:
-			if typ.Encoding == btf.Signed {
-				t.isSign = true
-			}
-			if target := dataExpr.CompareInfo.Threshold.Int; target != nil {
-				var err error
-				if t.isSign {
-					t.S_target, err = strconv.ParseInt(*target, 0, 64)
-					if err != nil {
-						fmt.Printf("%s fail to ParseInt: %s\n", *target, err)
-						os.Exit(1)
-					}
-				} else {
-					t.Target, err = strconv.ParseUint(*target, 0, 64)
-					if err != nil {
-						fmt.Printf("%s fail to ParseUint: %s\n", *target, err)
-						os.Exit(1)
-					}
-				}
-			}
-		case *btf.Pointer:
-			target := dataExpr.CompareInfo.Threshold.Int
-			var err error
-			t.Target, err = strconv.ParseUint(*target, 0, 64)
-			if err != nil {
-				fmt.Printf("%s fail to ParseUint: %s\n", *target, err)
-				os.Exit(1)
-			}
-		case *btf.Enum:
-			if typ.Signed {
-				t.isSign = true
-			}
+		if t.isStr {
 			if target := dataExpr.CompareInfo.Threshold.String; target != nil {
-				for i := 0; i < len(typ.Values); i++ {
-					if *target == typ.Values[i].Name {
-						if t.isSign {
-							t.S_target = int64(typ.Values[i].Value)
-						} else {
-							t.Target = typ.Values[i].Value
+				tb := (*[8]byte)(unsafe.Pointer(&t.Target))
+				copy(tb[:], *target)
+				t.Size = len(*target)
+			}
+		} else {
+			switch typ := btf.UnderlyingType(t.Typ).(type) {
+			case *btf.Int:
+				if typ.Encoding == btf.Signed {
+					t.isSign = true
+				}
+				if target := dataExpr.CompareInfo.Threshold.Int; target != nil {
+					var err error
+					if t.isSign {
+						t.S_target, err = strconv.ParseInt(*target, 0, 64)
+						if err != nil {
+							fmt.Printf("%s fail to ParseInt: %s\n", *target, err)
+							os.Exit(1)
+						}
+					} else {
+						t.Target, err = strconv.ParseUint(*target, 0, 64)
+						if err != nil {
+							fmt.Printf("%s fail to ParseUint: %s\n", *target, err)
+							os.Exit(1)
 						}
 					}
 				}
+			case *btf.Pointer:
+				target := dataExpr.CompareInfo.Threshold.Int
+				var err error
+				t.Target, err = strconv.ParseUint(*target, 0, 64)
+				if err != nil {
+					fmt.Printf("%s fail to ParseUint: %s\n", *target, err)
+					os.Exit(1)
+				}
+			case *btf.Enum:
+				if typ.Signed {
+					t.isSign = true
+				}
+				if target := dataExpr.CompareInfo.Threshold.String; target != nil {
+					for i := 0; i < len(typ.Values); i++ {
+						if *target == typ.Values[i].Name {
+							if t.isSign {
+								t.S_target = int64(typ.Values[i].Value)
+							} else {
+								t.Target = typ.Values[i].Value
+							}
+						}
+					}
+				}
+			default:
+				fmt.Printf("%+v do not support cmp now\n", typ)
+				os.Exit(1)
 			}
-		default:
-			fmt.Printf("%+v do not support cmp now\n", typ)
-			os.Exit(1)
 		}
-
 	}
 	fmt.Printf("result: %+v\n\n", t)
 	return t
