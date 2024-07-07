@@ -19,7 +19,7 @@ EXAMPLES:
 	efunc debug "ip_rcv"
 	efunc debug "ip_rcv(*skb, skb->len, skb->dev.name)"
 	efunc trace -e "ip_rcv(skb->len)" -a ":net/ipv4/*" -a "virtio_net:*"	
-	efunc trace -e "tcp_v4_rcv(skb, skb->head, skb->transport_header, (struct tcphdr *)(1,2,1,0)->syn == 1)""
+	efunc trace -e "tcp_v4_rcv(skb, skb->head, skb->transport_header, (struct tcphdr *)(1,2,1,0)->syn == 1)"
 
 ENVIRONMENT:
 	BTF_SHOW_ZERO		[default: 0] show field info even value is zero
