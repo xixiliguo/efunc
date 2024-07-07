@@ -45,6 +45,8 @@ volatile const bool verbose = false;
 volatile const bool has_bpf_get_func_ip = false;
 volatile const u64 kret_offset = 0;
 
+volatile const u8 max_depth = 32;
+
 volatile const u32 comm_allow_cnt = 0;
 volatile const u32 comm_deny_cnt = 0;
 volatile const u32 pid_allow_cnt = 0;
@@ -649,11 +651,12 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
 
     u64 d = e->depth;
     barrier_var(d);
-    if (d >= MAX_STACK_DEPTH) {
+    if (d >= max_depth || d >= MAX_STACK_DEPTH) {
         if (verbose) {
             bpf_printk("funcentry event %llx depth %d exceed %d", e, e->depth,
                        MAX_STACK_DEPTH);
         }
+        e->depth = d + 1;
         return 0;
     }
 
@@ -771,8 +774,11 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
     }
     d -= 1;
     barrier_var(d);
-    if (d >= MAX_STACK_DEPTH) {
-        bpf_printk("funcret depth %d exceed %d", d, MAX_STACK_DEPTH);
+    if (d >= max_depth || d >= MAX_STACK_DEPTH) {
+        if (verbose) {
+            bpf_printk("funcret depth %d exceed %d", d, MAX_STACK_DEPTH);
+        }
+        e->depth = d;
         return 0;
     }
 

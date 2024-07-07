@@ -225,6 +225,17 @@ ENVIRONMENT:
 						Name:  "duration",
 						Usage: "show trace with duration >= xx ms",
 					},
+					&cli.Uint64Flag{
+						Name:  "depth",
+						Usage: "max call trace depth, value range (0,32]",
+						Value: 32,
+						Action: func(ctx *cli.Context, i uint64) error {
+							if i == 0 || i > 32 {
+								return fmt.Errorf("depth rage must (0,32]")
+							}
+							return nil
+						},
+					},
 				},
 				Action: func(ctx *cli.Context) error {
 					exprFmt, _ := regexp.Compile(`.*\(.*\)`)
@@ -282,6 +293,7 @@ ENVIRONMENT:
 						Target:            ctx.String("command"),
 						InheritChild:      ctx.Bool("inherit"),
 						Duration:          ctx.Uint64("duration"),
+						Depth:             ctx.Uint64("depth"),
 					}
 
 					fg, err := funcgraph.NewFuncGraph(&opt)

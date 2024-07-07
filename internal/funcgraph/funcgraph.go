@@ -72,6 +72,7 @@ type Option struct {
 	Target            string
 	InheritChild      bool
 	Duration          uint64
+	Depth             uint64
 }
 
 type FuncEvent struct {
@@ -151,6 +152,7 @@ type FuncGraph struct {
 	targetCmdSend   chan int
 	inheritChild    bool
 	duration        uint64
+	depth           uint64
 }
 
 func NewFuncGraph(opt *Option) (*FuncGraph, error) {
@@ -172,6 +174,7 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 		targetCmdSend:  make(chan int),
 		inheritChild:   opt.InheritChild,
 		duration:       opt.Duration,
+		depth:          opt.Depth,
 	}
 	for i := 0; i < len(fg.spaceCache); i++ {
 		fg.spaceCache[i] = ' '
@@ -558,6 +561,7 @@ func (fg *FuncGraph) load() error {
 	consts["comm_allow_cnt"] = fg.allow_comm_cnt
 	consts["comm_deny_cnt"] = fg.deny_comm_cnt
 	consts["duration_ms"] = fg.duration
+	consts["max_depth"] = uint8(fg.depth)
 
 	if err := spec.RewriteConstants(consts); err != nil {
 		return fmt.Errorf("spec RewriteConstants: %w", err)
