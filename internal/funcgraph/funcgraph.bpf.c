@@ -350,6 +350,31 @@ static __always_inline void extract_ret_trace_data(struct func_ret_event *r,
         }
         u64 prev_data = 0;
         u64 data = r->ret;
+
+        if (t.base_addr) {
+            if (t.base < i) {
+                s64 addr =0;
+                u16 b = t.base * MAX_TRACE_DATA;
+                bpf_probe_read_kernel(&addr, 8, &r->buf[b]);
+                if (t.scale != 0 && t.index < i) {
+                    u16 bi = t.index * MAX_TRACE_DATA;
+                    s64 i = 0;
+                    u16 sz = fn->ret_trace[t.index].size;
+                    if (sz > 8) {
+                        continue;
+                    }
+                    bpf_probe_read_kernel(&i, sz, &r->buf[bi]);
+                    addr += i * t.scale;
+                }
+                if (t.imm != 0) {
+                    addr += t.imm;
+                }
+                data = (u64)addr;
+            } else {
+                continue;
+            }
+        }
+
         bpf_probe_read_kernel(&r->buf[off], 8, &data);
         for (u8 idx = 0; idx < t.field_cnt && idx < MAX_TRACE_FIELD_LEN;
              idx++) {
