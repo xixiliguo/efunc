@@ -283,87 +283,50 @@ static __always_inline void print_event(struct call_event *e, char *when) {
     return;
 }
 
-static __always_inline void extract_trace_data(struct func_entry_event *e,
-                                               struct func *fn) {
-    for (int i = 0; i < fn->trace_cnt && i < MAX_TRACES; i++) {
+
+
+static __always_inline void extract_data(u8 cnt, bool is_ret, u8 *buf,
+                                               struct func *fn, u64 *para, u64 ret) {
+    for (int i = 0; i < cnt && i < MAX_TRACES; i++) {
         u16 off = i * MAX_TRACE_DATA;
         struct trace_data t = fn->trace[i];
+        if (is_ret) {
+            t = fn->ret_trace[i];
+        }
         if (t.size == 0) {
             break;
         }
 
-        if (t.para < PARA_LEN) {
-            u64 prev_data = 0;
-            u64 data = e->para[t.para];
-            if (t.base_addr) {
-                if (t.base < i) {
-                    s64 addr =0;
-                    u16 b = t.base * MAX_TRACE_DATA;
-                    bpf_probe_read_kernel(&addr, 8, &e->buf[b]);
-                    if (t.scale != 0 && t.index < i) {
-                        u16 bi = t.index * MAX_TRACE_DATA;
-                        s64 i = 0;
-                        u16 sz = fn->trace[t.index].size;
-                        if (sz > 8) {
-                            continue;
-                        }
-                        bpf_probe_read_kernel(&i, sz, &e->buf[bi]);
-                        addr += i * t.scale;
-                    }
-                    if (t.imm != 0) {
-                        addr += t.imm;
-                    }
-                    data = (u64)addr;
-                } else {
-                    continue;
-                }
-            }
-            bpf_probe_read_kernel(&e->buf[off], 8, &data);
-            for (u8 idx = 0; idx < t.field_cnt && idx < MAX_TRACE_FIELD_LEN;
-                 idx++) {
-                data += t.offsets[idx];
-                prev_data = data;
-                bpf_probe_read_kernel(&data, sizeof(data), (void *)data);
-            }
-            if (prev_data != 0) {
-                u16 sz = t.size;
-                if (sz > MAX_TRACE_DATA) {
-                    sz = MAX_TRACE_DATA;
-                }
-                bpf_probe_read_kernel(&e->buf[off], sz, (void *)prev_data);
-                if (t.is_str) {
-                    bpf_probe_read_kernel_str(&e->buf[off], MAX_TRACE_DATA,
-                                              (void *)data);
-                }
-            }
-        }
-    }
-}
-
-static __always_inline void extract_ret_trace_data(struct func_ret_event *r,
-                                                   struct func *fn) {
-    for (int i = 0; i < fn->ret_trace_cnt && i < MAX_TRACES; i++) {
-        u16 off = i * MAX_TRACE_DATA;
-        struct trace_data t = fn->ret_trace[i];
-        if (t.size == 0) {
-            break;
-        }
         u64 prev_data = 0;
-        u64 data = r->ret;
+        u64 data = 0;
+        if (para != NULL) {
+            if (t.para < PARA_LEN) {
+                prev_data = 0;
+                data = para[t.para];
+            } else {
+                continue;;
+            }
+        } else {
+            prev_data = 0;
+            data = ret;
+        }
 
         if (t.base_addr) {
             if (t.base < i) {
                 s64 addr =0;
                 u16 b = t.base * MAX_TRACE_DATA;
-                bpf_probe_read_kernel(&addr, 8, &r->buf[b]);
+                bpf_probe_read_kernel(&addr, 8, &buf[b]);
                 if (t.scale != 0 && t.index < i) {
                     u16 bi = t.index * MAX_TRACE_DATA;
                     s64 i = 0;
-                    u16 sz = fn->ret_trace[t.index].size;
+                    u16 sz = fn->trace[t.index].size;
+                    if (is_ret) {
+                        sz = fn->ret_trace[t.index].size;
+                    }
                     if (sz > 8) {
                         continue;
                     }
-                    bpf_probe_read_kernel(&i, sz, &r->buf[bi]);
+                    bpf_probe_read_kernel(&i, sz, &buf[bi]);
                     addr += i * t.scale;
                 }
                 if (t.imm != 0) {
@@ -374,10 +337,9 @@ static __always_inline void extract_ret_trace_data(struct func_ret_event *r,
                 continue;
             }
         }
-
-        bpf_probe_read_kernel(&r->buf[off], 8, &data);
+        bpf_probe_read_kernel(&buf[off], 8, &data);
         for (u8 idx = 0; idx < t.field_cnt && idx < MAX_TRACE_FIELD_LEN;
-             idx++) {
+                idx++) {
             data += t.offsets[idx];
             prev_data = data;
             bpf_probe_read_kernel(&data, sizeof(data), (void *)data);
@@ -387,13 +349,29 @@ static __always_inline void extract_ret_trace_data(struct func_ret_event *r,
             if (sz > MAX_TRACE_DATA) {
                 sz = MAX_TRACE_DATA;
             }
-            bpf_probe_read_kernel(&r->buf[off], sz, (void *)prev_data);
+            bpf_probe_read_kernel(&buf[off], sz, (void *)prev_data);
             if (t.is_str) {
-                bpf_probe_read_kernel_str(&r->buf[off], MAX_TRACE_DATA,
-                                          (void *)data);
+                bpf_probe_read_kernel_str(&buf[off], MAX_TRACE_DATA,
+                                            (void *)data);
             }
         }
     }
+}
+
+
+
+static __always_inline void extract_trace_data(struct func_entry_event *e,
+                                               struct func *fn) {
+
+    extract_data(fn->trace_cnt, false, e->buf, fn , e->para,0);
+   
+}
+
+
+static __always_inline void extract_ret_trace_data(struct func_ret_event *r,
+                                                   struct func *fn) {
+                                                
+    extract_data(fn->ret_trace_cnt, true, r->buf, fn , NULL, r->ret);
 }
 
 static __always_inline bool trace_have_filter_expr(struct func *fn) {
