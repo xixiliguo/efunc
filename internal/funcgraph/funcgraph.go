@@ -208,6 +208,9 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 	for _, expr := range exprs {
 		if sym.Module == expr.Module && sym.Name == expr.Name {
 			id, info := fg.findBTFInfo(sym)
+			if info == nil {
+				return FuncInfo{}, false
+			}
 			fn := FuncInfo{
 				isEntry: isEntry,
 				Symbol:  sym,
@@ -277,6 +280,9 @@ func (fg *FuncGraph) matchSymByDwarf(sym Symbol, funcsOfDwarf map[Symbol]struct{
 
 	if _, ok := funcsOfDwarf[symD]; ok {
 		id, info := fg.findBTFInfo(sym)
+		if info == nil {
+			return FuncInfo{}, false
+		}
 		fn := FuncInfo{
 			isEntry: isEntry,
 			Symbol:  sym,
@@ -302,6 +308,9 @@ func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (
 
 			if mod == sym.Module {
 				id, info := fg.findBTFInfo(sym)
+				if info == nil {
+					return FuncInfo{}, false
+				}
 				fn := FuncInfo{
 					isEntry: isEntry,
 					Symbol:  sym,
