@@ -266,14 +266,14 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			d := *(*int32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)])))
 			for _, value := range t.Values {
 				if value.Value == uint64(d) {
-					opt.WriteStrings(space, name, connector, opt.typString(t), value.Name, "\n")
+					opt.WriteStrings(space, name, connector, "(", opt.typString(t), ")", value.Name, "\n")
 				}
 			}
 		} else {
 			d := *(*uint32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)])))
 			for _, value := range t.Values {
 				if value.Value == uint64(d) {
-					opt.WriteStrings(space, name, connector, "(", opt.typString(t), ") ", value.Name, "\n")
+					opt.WriteStrings(space, name, connector, "(", opt.typString(t), ")", value.Name, "\n")
 				}
 			}
 		}
