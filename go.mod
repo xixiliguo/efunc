@@ -5,6 +5,7 @@ go 1.21.1
 require (
 	github.com/alecthomas/participle/v2 v2.1.1
 	github.com/cilium/ebpf v0.13.0
+	github.com/google/go-cmp v0.6.0
 	github.com/prometheus/procfs v0.12.0
 	github.com/urfave/cli/v2 v2.27.1
 	golang.org/x/sys v0.17.0
