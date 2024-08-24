@@ -297,17 +297,16 @@ static __always_inline void extract_data(u8 cnt, bool is_ret, u8 *buf,
             break;
         }
 
-        u64 prev_data = 0;
         u64 data = 0;
+        u64 prev_data = (u64)&data;
+
         if (para != NULL) {
             if (t.para < PARA_LEN) {
-                prev_data = 0;
                 data = para[t.para];
             } else {
                 continue;;
             }
         } else {
-            prev_data = 0;
             data = ret;
         }
 
@@ -337,23 +336,22 @@ static __always_inline void extract_data(u8 cnt, bool is_ret, u8 *buf,
                 continue;
             }
         }
-        bpf_probe_read_kernel(&buf[off], 8, &data);
+
         for (u8 idx = 0; idx < t.field_cnt && idx < MAX_TRACE_FIELD_LEN;
                 idx++) {
             data += t.offsets[idx];
             prev_data = data;
             bpf_probe_read_kernel(&data, sizeof(data), (void *)data);
         }
-        if (prev_data != 0) {
-            u16 sz = t.size;
-            if (sz > MAX_TRACE_DATA) {
-                sz = MAX_TRACE_DATA;
-            }
-            bpf_probe_read_kernel(&buf[off], sz, (void *)prev_data);
-            if (t.is_str) {
-                bpf_probe_read_kernel_str(&buf[off], MAX_TRACE_DATA,
-                                            (void *)data);
-            }
+
+        u16 sz = t.size;
+        if (sz > MAX_TRACE_DATA) {
+            sz = MAX_TRACE_DATA;
+        }
+        bpf_probe_read_kernel(&buf[off], sz, (void *)prev_data);
+        if (t.is_str) {
+            bpf_probe_read_kernel_str(&buf[off], MAX_TRACE_DATA,
+                                        (void *)data);
         }
     }
 }
