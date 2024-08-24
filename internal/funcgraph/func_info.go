@@ -127,7 +127,7 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 					t.Name = para.Name
 					t.onEntry = true
 					t.Para = idx
-					t.Size = 8
+					t.Size, _ = btf.Sizeof(para.Type)
 					t.Typ = para.Type
 					btfData = para.Type
 					break
@@ -136,7 +136,7 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 		} else {
 			t.Name = "ret"
 			t.onEntry = false
-			t.Size = 8
+			t.Size, _ = btf.Sizeof(proto.Return)
 			t.Typ = proto.Return
 			btfData = proto.Return
 		}
@@ -173,7 +173,7 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 			Target: structPtr,
 		}
 		t.Typ = pointer
-		t.Size = 8
+		t.Size, _ = btf.Sizeof(pointer)
 		btfData = pointer
 		dataExpr.Typ.Name = ""
 	}
