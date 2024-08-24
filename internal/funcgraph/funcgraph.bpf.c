@@ -394,6 +394,19 @@ static __always_inline bool ret_trace_have_filter_expr(struct func *fn) {
     return false;
 }
 
+static __always_inline int __strncmp(const void *m1, const void *m2, size_t len) {
+        const unsigned char *s1 = m1;
+        const unsigned char *s2 = m2;
+        int i, delta = 0;
+
+        for (i = 0; i < len; i++) {
+                delta = s1[i] - s2[i];
+                if (delta || s1[i] == 0 || s2[i] == 0)
+                        break;
+        }
+        return delta;
+}
+
 static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn, bool ret) {
 
     u8 trace_cnt = fn->trace_cnt;
@@ -419,13 +432,7 @@ static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn, bool re
 
         u16 off = i * MAX_TRACE_DATA;
 
-        if (t->is_str) {
-            u8 sz = t->size;
-            if (sz > 8) {
-                sz = 8;
-            }
-            bpf_probe_read_kernel(&src_data, sz, (void *)&buf[off]);
-        } else {
+        if (!t->is_str) {
             if (t->bitSize != 0) {
                 u64 num = 0;
 
@@ -540,14 +547,18 @@ static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn, bool re
             continue;
         }
 
-        if (t->is_str && t->cmp_operator == CMP_EQ && src_data == t->target) {
-            cmp_cnt_allowed++;
-            continue;
+        if (t->is_str) {
+            int re = __strncmp(&buf[off] , &t->target,8);
+            if (t->cmp_operator == CMP_EQ && re == 0) {
+                cmp_cnt_allowed++;
+                continue; 
+            }
+            if (t->cmp_operator == CMP_NOTEQ && re != 0) {
+                cmp_cnt_allowed++;
+                continue; 
+            }
         }
-        if (t->is_str && t->cmp_operator == CMP_NOTEQ && src_data != t->target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
+
 
     }
 

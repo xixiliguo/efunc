@@ -4,12 +4,9 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 func TestFuncExpr(t *testing.T) {
-
-	one := "1"
 
 	cases := []struct {
 		input  string
@@ -53,7 +50,26 @@ func TestFuncExpr(t *testing.T) {
 						SohwString:  false,
 						CompareInfo: Compare{
 							Operator:  "==",
-							Threshold: Value{Int: &one},
+							Threshold: Value{s: "1"},
+						},
+					},
+				},
+			},
+		},
+		{input: `do_filp_open(pathname->name:str == "/etc/hosts")`,
+			output: &FuncExpr{
+				Module: "",
+				Name:   "do_filp_open",
+				Datas: []DataExpr{
+					{
+						Dereference: false,
+						Typ:         CastType{},
+						First:       Primary{Name: "pathname"},
+						Fields:      []Field{{Name: "name"}},
+						SohwString:  true,
+						CompareInfo: Compare{
+							Operator:  "==",
+							Threshold: Value{s: `"/etc/hosts"`},
 						},
 					},
 				},
@@ -68,7 +84,7 @@ func TestFuncExpr(t *testing.T) {
 			}
 		} else {
 			opts := []cmp.Option{
-				cmpopts.IgnoreUnexported(),
+				cmp.AllowUnexported(Value{}),
 			}
 			if !cmp.Equal(re, c.output, opts...) {
 				t.Fatalf("data should be the same\n%s\n", cmp.Diff(re, c.output, opts...))

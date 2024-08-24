@@ -1,6 +1,7 @@
 package funcgraph
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -52,12 +53,35 @@ type Field struct {
 
 type Compare struct {
 	Operator  string `parser:"Whitespace@Operator"`
-	Threshold Value  `parser:"Whitespace@@"`
+	Threshold Value  `parser:"Whitespace@(String|Number)"`
 }
 
 type Value struct {
-	String *string `parser:"@Ident"`
-	Int    *string `parser:"| @Number"`
+	s string
+}
+
+func (v *Value) Capture(values []string) error {
+	v.s = values[0]
+	return nil
+}
+
+func (v Value) String() string {
+	return v.s
+}
+
+func (v Value) ShowString() (string, error) {
+	if len(v.s) >= 3 && v.s[0] == '"' && v.s[len(v.s)-1] == '"' {
+		return v.s[1 : len(v.s)-1], nil
+	}
+	return "", errors.New("should not empty string")
+}
+
+func (v Value) ShowSignNumber() (int64, error) {
+	return strconv.ParseInt(v.s, 0, 64)
+}
+
+func (v Value) ShowUnsignNumber() (uint64, error) {
+	return strconv.ParseUint(v.s, 0, 64)
 }
 
 type FuncInfo struct {
@@ -215,12 +239,15 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 
 	if dataExpr.CompareInfo.Operator != "" {
 		t.CmpOperator = convertCMPOp(dataExpr.CompareInfo.Operator)
+		threshold := dataExpr.CompareInfo.Threshold
 
 		if t.isStr {
-			if target := dataExpr.CompareInfo.Threshold.String; target != nil {
+			if target, err := threshold.ShowString(); err == nil {
 				tb := (*[8]byte)(unsafe.Pointer(&t.Target))
-				copy(tb[:], *target)
-				t.Size = len(*target)
+				copy(tb[:], target)
+			} else {
+				fmt.Printf("%s fail to get string: %s\n", threshold, err)
+				os.Exit(1)
 			}
 		} else {
 			switch typ := btf.UnderlyingType(t.Typ).(type) {
@@ -228,37 +255,35 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 				if typ.Encoding == btf.Signed {
 					t.isSign = true
 				}
-				if target := dataExpr.CompareInfo.Threshold.Int; target != nil {
-					var err error
-					if t.isSign {
-						t.S_target, err = strconv.ParseInt(*target, 0, 64)
-						if err != nil {
-							fmt.Printf("%s fail to ParseInt: %s\n", *target, err)
-							os.Exit(1)
-						}
-					} else {
-						t.Target, err = strconv.ParseUint(*target, 0, 64)
-						if err != nil {
-							fmt.Printf("%s fail to ParseUint: %s\n", *target, err)
-							os.Exit(1)
-						}
+				var err error
+				if t.isSign {
+					t.S_target, err = threshold.ShowSignNumber()
+					if err != nil {
+						fmt.Printf("%s fail to ParseInt: %s\n", threshold, err)
+						os.Exit(1)
+					}
+				} else {
+					t.Target, err = threshold.ShowUnsignNumber()
+					if err != nil {
+						fmt.Printf("%s fail to ParseUint: %s\n", threshold, err)
+						os.Exit(1)
 					}
 				}
+
 			case *btf.Pointer:
-				target := dataExpr.CompareInfo.Threshold.Int
 				var err error
-				t.Target, err = strconv.ParseUint(*target, 0, 64)
+				t.Target, err = threshold.ShowUnsignNumber()
 				if err != nil {
-					fmt.Printf("%s fail to ParseUint: %s\n", *target, err)
+					fmt.Printf("%s fail to ParseUint: %s\n", threshold, err)
 					os.Exit(1)
 				}
 			case *btf.Enum:
 				if typ.Signed {
 					t.isSign = true
 				}
-				if target := dataExpr.CompareInfo.Threshold.String; target != nil {
+				if target, err := threshold.ShowString(); err == nil {
 					for i := 0; i < len(typ.Values); i++ {
-						if *target == typ.Values[i].Name {
+						if target == typ.Values[i].Name {
 							if t.isSign {
 								t.S_target = int64(typ.Values[i].Value)
 							} else {
@@ -266,6 +291,9 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 							}
 						}
 					}
+				} else {
+					fmt.Printf("%s fail to get string: %s\n", threshold, err)
+					os.Exit(1)
 				}
 			default:
 				fmt.Printf("%+v do not support cmp now\n", typ)
@@ -377,6 +405,7 @@ var funcParserFunc = sync.OnceValue[*participle.Parser[FuncExpr]](func() *partic
 		{Name: "Separator", Pattern: `,`},
 		{Name: "Operator", Pattern: `>=|>|==|!=|<=|<`},
 		{Name: "Number", Pattern: `([-+]?0x[a-zA-Z_0-9]+)|([-+]?\d+)`},
+		{Name: "String", Pattern: `".*"`},
 	})
 
 	parser, _ := participle.Build[FuncExpr](participle.Lexer(clexer))
