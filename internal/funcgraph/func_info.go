@@ -423,7 +423,7 @@ func ShowBtfFunc(fn *btf.Func) (s string) {
 		s += fmt.Sprintf(" %s(", fn.Name)
 		paras := []string{}
 		for _, para := range proto.Params {
-			paras = append(paras, typToString(para.Type)+para.Name)
+			paras = append(paras, typToString(para.Type)+" "+para.Name)
 		}
 		s += strings.Join(paras, ", ")
 		s += ")"
