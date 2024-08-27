@@ -1,6 +1,7 @@
 package funcgraph
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -23,7 +24,6 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
-	"github.com/prometheus/procfs"
 	"github.com/xixiliguo/efunc/internal/sysinfo"
 	"golang.org/x/sys/unix"
 )
@@ -495,14 +495,25 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 }
 
 func (fg *FuncGraph) Init() error {
-
-	if fs, err := procfs.NewFS("/proc"); err != nil {
+	if r, err := os.Open("/proc/stat"); err != nil {
 		return err
 	} else {
-		if stats, err := fs.Stat(); err != nil {
-			return err
-		} else {
-			fg.bootTime = stats.BootTime
+		defer r.Close()
+		scanner := bufio.NewScanner(r)
+		for scanner.Scan() {
+			parts := strings.Fields(scanner.Text())
+			if len(parts) < 2 {
+				continue
+			}
+			if parts[0] == "btime" {
+				if fg.bootTime, err = strconv.ParseUint(parts[1], 10, 64); err != nil {
+					return fmt.Errorf("couldn't parse %q (btime): %w", parts[1], err)
+				}
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("couldn't parse %q: %w", "/proc/stat", err)
 		}
 	}
 
