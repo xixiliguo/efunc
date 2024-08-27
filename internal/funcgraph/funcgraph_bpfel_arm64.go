@@ -101,7 +101,6 @@ type funcgraphTraceData struct {
 	IsSign      bool
 	CmpOperator uint8
 	Target      uint64
-	S_target    int64
 	BitOff      uint32
 	BitSize     uint32
 }

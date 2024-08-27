@@ -630,7 +630,6 @@ func (fg *FuncGraph) load() error {
 				IsSign:      t.isSign,
 				CmpOperator: t.CmpOperator,
 				Target:      t.Target,
-				S_target:    t.S_target,
 				BitOff:      t.BitOff,
 				BitSize:     t.BitSize,
 			}
@@ -653,7 +652,6 @@ func (fg *FuncGraph) load() error {
 				IsSign:      t.isSign,
 				CmpOperator: t.CmpOperator,
 				Target:      t.Target,
-				S_target:    t.S_target,
 				BitOff:      t.BitOff,
 				BitSize:     t.BitSize,
 			}

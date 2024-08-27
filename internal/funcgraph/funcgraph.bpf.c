@@ -67,7 +67,6 @@ struct trace_data {
     bool is_sign;
     u8 cmp_operator;
     u64 target;
-    s64 s_target;
     u32 bitOff;
     u32 bitSize;
 };
@@ -404,8 +403,8 @@ static __always_inline int __strncmp(const void *m1, const void *m2, size_t len)
         return delta;
 }
 
-static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn, bool ret) {
-
+static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn,
+                                               bool ret) {
     u8 trace_cnt = fn->trace_cnt;
     struct trace_data *tp = fn->trace;
     if (ret) {
@@ -418,9 +417,8 @@ static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn, bool re
     u8 cmp_cnt_allowed = 0;
 
     for (int i = 0; i < trace_cnt && i < MAX_TRACES; i++) {
-
-        u64 src_data = 0;
-        s64 s_src_data = 0;
+        u64 src_unsign_data = 0;
+        s64 src_sign_data = 0;
         struct trace_data *t = tp + i;
 
         if (t->cmp_operator == CMP_NOP) {
@@ -429,134 +427,79 @@ static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn, bool re
 
         u16 off = i * MAX_TRACE_DATA;
 
-        if (!t->is_str) {
-            if (t->bitSize != 0) {
-                u64 num = 0;
-
-                if (t->size == 1) {
-                    num = *(u8 *)&buf[off];
-                }
-                if (t->size == 2) {
-                    num = *(u16 *)&buf[off];
-                }
-                if (t->size == 4) {
-                    num = *(u32 *)&buf[off];
-                }
-                if (t->size == 8) {
-                    num = *(u64 *)&buf[off];
-                }
-
-                u32 left = 64 - t->bitOff - t->bitSize;
-                u32 right = 64 - t->bitSize;
-                num = (num << (u64)left) >> (u64)right;
-
-                if (!t->is_sign) {
-                    src_data = (u64)num;
-                } else {
-                    s_src_data = (s64)num;
-                }
-            } else {
-                if (!t->is_sign) {
-                    if (t->size == 1) {
-                        src_data = *(u8 *)&buf[off];
-                    }
-                    if (t->size == 2) {
-                        src_data = *(u16 *)&buf[off];
-                    }
-                    if (t->size == 4) {
-                        src_data = *(u32 *)&buf[off];
-                    }
-                    if (t->size == 8) {
-                        src_data = *(u64 *)&buf[off];
-                    }
-                }
-
-                if (t->is_sign) {
-                    if (t->size == 1) {
-                        s_src_data = *(s8 *)&buf[off];
-                    }
-                    if (t->size == 2) {
-                        s_src_data = *(s16 *)&buf[off];
-                    }
-                    if (t->size == 4) {
-                        s_src_data = *(s32 *)&buf[off];
-                    }
-                    if (t->size == 8) {
-                        s_src_data = *(s64 *)&buf[off];
-                    }
-                }
-            }
+        if (t->size == 1) {
+            src_unsign_data = *(u8 *)&buf[off];
+            src_sign_data = *(s8 *)&buf[off];
+        }
+        if (t->size == 2) {
+            src_unsign_data = *(u16 *)&buf[off];
+            src_sign_data = *(s16 *)&buf[off];
+        }
+        if (t->size == 4) {
+            src_unsign_data = *(u32 *)&buf[off];
+            src_sign_data = *(s32 *)&buf[off];
+        }
+        if (t->size == 8) {
+            src_unsign_data = *(u64 *)&buf[off];
+            src_sign_data = *(s64 *)&buf[off];
         }
 
+        if (t->bitSize != 0) {
+            u32 left = 64 - t->bitOff - t->bitSize;
+            u32 right = 64 - t->bitSize;
+            src_unsign_data = (src_unsign_data << (u64)left) >> (u64)right;
+        }
 
         cmp_cnt++;
 
-        if (!t->is_str && !t->is_sign && t->cmp_operator == CMP_EQ && src_data == t->target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && !t->is_sign && t->cmp_operator == CMP_NOTEQ && src_data != t->target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && !t->is_sign && t->cmp_operator == CMP_GT && src_data > t->target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && !t->is_sign && t->cmp_operator == CMP_GE && src_data >= t->target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && !t->is_sign && t->cmp_operator == CMP_LT && src_data < t->target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && !t->is_sign == false && t->cmp_operator == CMP_LE &&
-            src_data <= t->target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-
-        if (!t->is_str && t->is_sign && t->cmp_operator == CMP_EQ && s_src_data == t->s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && t->is_sign && t->cmp_operator == CMP_NOTEQ &&
-            s_src_data != t->s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && t->is_sign && t->cmp_operator == CMP_GT && s_src_data > t->s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && t->is_sign && t->cmp_operator == CMP_GE && s_src_data >= t->s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && t->is_sign && t->cmp_operator == CMP_LT && s_src_data < t->s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-        if (!t->is_str && t->is_sign == false && t->cmp_operator == CMP_LE &&
-            s_src_data <= t->s_target) {
-            cmp_cnt_allowed++;
-            continue;
-        }
-
         if (t->is_str) {
-            int re = __strncmp(&buf[off] , &t->target,8);
+            int re = __strncmp(&buf[off], &t->target, 8);
             if (t->cmp_operator == CMP_EQ && re == 0) {
                 cmp_cnt_allowed++;
-                continue; 
             }
             if (t->cmp_operator == CMP_NOTEQ && re != 0) {
                 cmp_cnt_allowed++;
-                continue; 
+            }
+        } else {
+            switch (t->cmp_operator) {
+                case CMP_EQ:
+                    if ((!t->is_sign && src_unsign_data == t->target) ||
+                        (t->is_sign && src_sign_data == (s64)t->target)) {
+                        cmp_cnt_allowed++;
+                    }
+                    break;
+                case CMP_NOTEQ:
+                    if ((!t->is_sign && src_unsign_data != t->target) ||
+                        (t->is_sign && src_sign_data != (s64)t->target)) {
+                        cmp_cnt_allowed++;
+                    }
+                    break;
+                case CMP_GT:
+                    if ((!t->is_sign && src_unsign_data > t->target) ||
+                        (t->is_sign && src_sign_data > (s64)t->target)) {
+                        cmp_cnt_allowed++;
+                    }
+                    break;
+                case CMP_GE:
+                    if ((!t->is_sign && src_unsign_data >= t->target) ||
+                        (t->is_sign && src_sign_data >= (s64)t->target)) {
+                        cmp_cnt_allowed++;
+                    }
+                    break;
+                case CMP_LT:
+                    if ((!t->is_sign && src_unsign_data < t->target) ||
+                        (t->is_sign && src_sign_data < (s64)t->target)) {
+                        cmp_cnt_allowed++;
+                    }
+                    break;
+                case CMP_LE:
+                    if ((!t->is_sign && src_unsign_data <= t->target) ||
+                        (t->is_sign && src_sign_data <= (s64)t->target)) {
+                        cmp_cnt_allowed++;
+                    }
+                    break;
             }
         }
-
-
     }
 
     return cmp_cnt == cmp_cnt_allowed;

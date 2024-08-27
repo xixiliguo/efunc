@@ -111,7 +111,6 @@ type TraceData struct {
 	isSign      bool
 	CmpOperator uint8
 	Target      uint64
-	S_target    int64
 }
 
 func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
@@ -257,7 +256,8 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 				}
 				var err error
 				if t.isSign {
-					t.S_target, err = threshold.ShowSignNumber()
+					n, err := threshold.ShowSignNumber()
+					t.Target = uint64(n)
 					if err != nil {
 						fmt.Printf("%s fail to ParseInt: %s\n", threshold, err)
 						os.Exit(1)
@@ -284,11 +284,7 @@ func GenTraceData(dataExpr DataExpr, fn *btf.Func) *TraceData {
 				if target, err := threshold.ShowString(); err == nil {
 					for i := 0; i < len(typ.Values); i++ {
 						if target == typ.Values[i].Name {
-							if t.isSign {
-								t.S_target = int64(typ.Values[i].Value)
-							} else {
-								t.Target = typ.Values[i].Value
-							}
+							t.Target = typ.Values[i].Value
 						}
 					}
 				} else {
