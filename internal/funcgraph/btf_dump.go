@@ -21,6 +21,7 @@ type dumpOption struct {
 	spaceCache     [1024]byte
 	typStringCache map[btf.Type]string
 	typSizeCache   map[btf.Type]int
+	compact        bool
 }
 
 func NewDumpOption() (*dumpOption, error) {
@@ -49,10 +50,11 @@ func NewDumpOption() (*dumpOption, error) {
 	return &d, nil
 }
 
-func (opt *dumpOption) Reset(data []byte, isStr bool, level int) {
+func (opt *dumpOption) Reset(data []byte, isStr bool, level int, compact bool) {
 	opt.data = data
 	opt.isStr = isStr
 	opt.level = level
+	opt.compact = compact
 	opt.buf.Reset()
 }
 
@@ -87,20 +89,25 @@ func (opt *dumpOption) WriteStrings(ss ...string) {
 	}
 }
 
-func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, bitSize int) bool {
+func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, bitSize int) int {
 
 	level := opt.level
 	data := opt.data
 
 	space := toString(opt.spaceCache[:2*level])
-	if sz, err := opt.typSize(typ); err != nil {
-		opt.WriteStrings(space, "don't know ", name, " size: ", err.Error(), "\n")
-		return false
+	if opt.compact {
+		space = ""
+	}
+
+	sz, err := opt.typSize(typ)
+	if err != nil {
+		opt.WriteStrings(space, "don't know ", name, " size: ", err.Error())
+		return -1
 	} else {
 		if offset != 0 && offset+sz > len(data) {
 			cnt := strconv.FormatInt(int64(offset), 10)
-			opt.WriteStrings(space, "/* only show first ", cnt, " bytes */\n")
-			return false
+			opt.WriteStrings(space, "/* only show first ", cnt, " bytes */")
+			return -1
 		}
 		i := 0
 		for ; i < sz; i++ {
@@ -109,25 +116,41 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			}
 		}
 		if !opt.showZero && i == sz && offset != 0 {
-			return true
+			return 0
 		}
 	}
+	span := "\n"
 
+	if opt.compact {
+		span = ""
+
+	}
 	connector := ""
 	if name != "" {
 		connector = " = "
+		if opt.compact {
+			connector = "="
+		}
 	}
 
 	if opt.isStr {
 		re := ByteSliceToString(data[offset:])
-		opt.WriteStrings(space, name, connector, re, "\n")
-		return true
+		opt.WriteStrings(space, name, connector, re)
+		return sz
 	}
 
 	typ = btf.UnderlyingType(typ)
 	switch t := typ.(type) {
 	case *btf.Union:
-		opt.WriteStrings(space, name, connector, "(", opt.typString(t), ") {\n")
+		opt.WriteStrings(space, name, connector)
+		if !opt.compact {
+			opt.WriteStrings("(", opt.typString(t), ")")
+		}
+		opt.WriteStrings("{", span)
+		sep := "\n"
+		if opt.compact {
+			sep = ","
+		}
 		for _, mem := range t.Members {
 			memOff, memBitOff := mem.Offset/8, mem.Offset%8
 			opt.level++
@@ -135,13 +158,26 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			bitSize = int(mem.BitfieldSize)
 			result := opt.dumpDataByBTF(mem.Name, mem.Type, offset+int(memOff), bitOff, bitSize)
 			opt.level--
-			if !result {
-				return false
+			if result < 0 {
+				return result
 			}
+			if result == 0 {
+				continue
+			}
+			opt.WriteStrings(sep)
 		}
-		opt.WriteStrings(space, "}\n")
+		// opt.WriteStrings(span)
+		opt.WriteStrings(space, "}")
 	case *btf.Struct:
-		opt.WriteStrings(space, name, connector, "(", opt.typString(t), ") {\n")
+		opt.WriteStrings(space, name, connector)
+		if !opt.compact {
+			opt.WriteStrings("(", opt.typString(t), ")")
+		}
+		opt.WriteStrings("{", span)
+		sep := "\n"
+		if opt.compact {
+			sep = ","
+		}
 		for _, mem := range t.Members {
 			memOff, memBitOff := mem.Offset/8, mem.Offset%8
 			opt.level++
@@ -149,11 +185,16 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			bitSize = int(mem.BitfieldSize)
 			result := opt.dumpDataByBTF(mem.Name, mem.Type, offset+int(memOff), bitOff, bitSize)
 			opt.level--
-			if !result {
-				return false
+			if result < 0 {
+				return result
 			}
+			if result == 0 {
+				continue
+			}
+			opt.WriteStrings(sep)
 		}
-		opt.WriteStrings(space, "}\n")
+		// opt.WriteStrings(span)
+		opt.WriteStrings(space, "}")
 
 	case *btf.Array:
 		// special case for char[]
@@ -163,20 +204,37 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			p := make([]byte, 0, 128)
 			d := data[offset : offset+int(t.Nelems)]
 			p = strconv.AppendQuote(p, toString(d))
-			opt.WriteStrings(space, name, connector, "(", opt.typString(t.Type), "[", n, "]) ", toString(p), "\n")
-			return true
+			opt.WriteStrings(space, name, connector)
+			if !opt.compact {
+				opt.WriteStrings("(", opt.typString(t.Type), "[", n, "]) ")
+			}
+			opt.WriteStrings(toString(p))
+			return sz
 		}
 		cnt := strconv.FormatUint(uint64(t.Nelems), 10)
-		opt.WriteStrings(space, name, connector, "(", opt.typString(t.Type), "[", cnt, ")) {\n")
+		opt.WriteStrings(space, name, connector)
+		if !opt.compact {
+			opt.WriteStrings("(", opt.typString(t.Type), "[", cnt, "))")
+		}
+		opt.WriteStrings(" {", span)
+		sep := "\n"
+		if opt.compact {
+			sep = ","
+		}
 		for i := 0; i < int(t.Nelems); i++ {
 			opt.level++
 			result := opt.dumpDataByBTF(strconv.Itoa(i), t.Type, offset+i*sz, bitOff, bitSize)
 			opt.level--
-			if !result {
-				return false
+			if result < 0 {
+				return result
 			}
+			if result == 0 {
+				continue
+			}
+			opt.WriteStrings(sep)
 		}
-		opt.WriteStrings(space, "}\n")
+		// opt.WriteStrings(span)
+		opt.WriteStrings(space, "}")
 	case *btf.Int:
 		msg := make([]byte, 0, 16)
 		if bitSize != 0 {
@@ -188,7 +246,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			right := 64 - bitSize
 			num = (num << uint64(left)) >> uint64(right)
 			if !opt.showZero && num == 0 && offset != 0 {
-				return true
+				return 0
 			}
 			if t.Encoding == btf.Signed {
 				msg = strconv.AppendInt(msg, int64(num), 10)
@@ -249,41 +307,56 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 				msg = fmt.Appendf(msg, "unkown(%v)", t)
 			}
 		}
-		opt.WriteStrings(space, name, connector, "(", opt.typString(t), ")", toString(msg), "\n")
+		opt.WriteStrings(space, name, connector)
+		if !opt.compact {
+			opt.WriteStrings("(", opt.typString(t), ")")
+		}
+		opt.WriteStrings(toString(msg))
 	case *btf.Pointer:
 		p := *(*uint64)(unsafe.Pointer(unsafe.SliceData(data[offset:])))
 		msg := make([]byte, 0, 32)
 		msg = strconv.AppendUint(msg, p, 16)
-		opt.WriteStrings(space, name, connector, "(", opt.typString(t), ")", "0x", toString(msg), " ")
-		if p != 0 {
+		opt.WriteStrings(space, name, connector)
+		if !opt.compact {
+			opt.WriteStrings("(", opt.typString(t), ")")
+		}
+		opt.WriteStrings("0x", toString(msg))
+		if p != 0 && !opt.compact {
 			if sym := opt.ksyms.SymbolByAddr(p); sym.Addr == p {
-				opt.WriteStrings("<", sym.Name, ">")
+				opt.WriteStrings(" <", sym.Name, ">")
 			}
 		}
-		opt.buf.WriteString("\n")
 	case *btf.Enum:
 		if t.Signed {
 			d := *(*int32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)])))
 			for _, value := range t.Values {
 				if value.Value == uint64(d) {
-					opt.WriteStrings(space, name, connector, "(", opt.typString(t), ")", value.Name, "\n")
+					opt.WriteStrings(space, name, connector)
+					if !opt.compact {
+						opt.WriteStrings("(", opt.typString(t), ")")
+					}
+					opt.WriteStrings(value.Name)
 				}
 			}
 		} else {
 			d := *(*uint32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)])))
 			for _, value := range t.Values {
 				if value.Value == uint64(d) {
-					opt.WriteStrings(space, name, connector, "(", opt.typString(t), ")", value.Name, "\n")
+					opt.WriteStrings(space, name, connector)
+					if !opt.compact {
+						opt.WriteStrings("(", opt.typString(t), ")")
+					}
+					opt.WriteStrings(value.Name)
 				}
 			}
 		}
 	case *btf.Void:
-		opt.WriteStrings(space, name, connector, "void", "\n")
+		opt.WriteStrings(space, name, connector, "void")
 	default:
 		typ := fmt.Sprintf("%v", t)
-		opt.WriteStrings(space, name, connector, "don't know how to print ", typ, "\n")
+		opt.WriteStrings(space, name, connector, "don't know how to print ", typ)
 	}
-	return true
+	return sz
 }
 
 var specCache = make(map[string]*btf.Spec)

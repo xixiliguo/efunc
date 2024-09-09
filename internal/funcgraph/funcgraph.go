@@ -25,10 +25,9 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/xixiliguo/efunc/internal/sysinfo"
-	"golang.org/x/sys/unix"
 )
 
-//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 -type start_event -type func_entry_event -type func_ret_event -type trace_data funcgraph funcgraph.bpf.c -- -I../include
+//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 -type start_event -type func_entry_event -type func_ret_event -type trace_data -type arg_type -type arg_addr -type trace_data_flags -type event_data -type trace_constant funcgraph funcgraph.bpf.c -- -I../include
 
 type Event uint8
 
@@ -84,10 +83,12 @@ type FuncEvent struct {
 	Ip       uint64
 	Id       uint32
 	Time     uint64
-	Para     [5]uint64
-	Buf      *[5120]uint8
+	Para     [funcgraphTraceConstantPARA_LEN]uint64
+	DataLen  uint16
+	DataOff  [9]int16
+	Data     *[MaxTraceDataLen]uint8
 	Duration uint64
-	Ret      uint64
+	Ret      [2]uint64
 }
 
 type FuncEvents []FuncEvent
@@ -118,9 +119,9 @@ var defaultDenyFuncs = []string{
 }
 
 type FuncGraph struct {
-	funcs           []FuncInfo
+	funcs           []*FuncInfo
 	links           []link.Link
-	idToFuncs       map[btf.TypeID]FuncInfo
+	idToFuncs       map[btf.TypeID]*FuncInfo
 	verbose         bool
 	bpfLog          bool
 	dryRun          bool
@@ -165,7 +166,7 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 		output:         os.Stdout,
 		ringBufferSize: opt.MaxEntries,
 		mode:           opt.Mode,
-		idToFuncs:      map[btf.TypeID]FuncInfo{},
+		idToFuncs:      map[btf.TypeID]*FuncInfo{},
 		pids:           map[uint32]bool{},
 		comms:          map[[16]uint8]bool{},
 		taskToEvents:   map[uint64]*FuncEvents{},
@@ -191,7 +192,7 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 	}
 	fg.dataPool = sync.Pool{
 		New: func() interface{} {
-			return &[5120]uint8{}
+			return &[MaxTraceDataLen]uint8{}
 		},
 	}
 
@@ -204,74 +205,38 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 	return fg, nil
 }
 
-func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool) (FuncInfo, bool) {
+func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool) (*FuncInfo, bool) {
 	for _, expr := range exprs {
 		if sym.Module == expr.Module && sym.Name == expr.Name {
 			id, info := fg.findBTFInfo(sym)
 			if info == nil {
-				return FuncInfo{}, false
+				return nil, false
 			}
-			fn := FuncInfo{
-				isEntry: isEntry,
+			fn := &FuncInfo{
+				IsEntry: isEntry,
 				Symbol:  sym,
 				id:      id,
-				btfinfo: info,
+				Btfinfo: info,
 			}
-			pos := make([]int, len(expr.Datas))
-			isEntry := make([]bool, len(expr.Datas))
-			for idx, data := range expr.Datas {
-				t := GenTraceData(data, info)
-				if t.BaseAddr {
-					if int(t.Base) >= idx {
-						continue
-					}
-					if int(t.Index) >= idx {
-						continue
-					}
-					if t.Scale != 0 {
-						if isEntry[t.Base] != isEntry[t.Index] {
-							continue
-						}
-					}
-					t.onEntry = isEntry[t.Base]
-					t.Base = uint8(pos[t.Base])
-					t.Index = uint8(pos[t.Index])
-					var baseType btf.Type
-					if t.onEntry {
-						baseType = fn.trace[t.Base].Typ
-					} else {
-						baseType = fn.retTrace[t.Base].Typ
-					}
-					if _, ok := baseType.(*btf.Pointer); !ok {
-						fmt.Printf("Base type is not pointer\n")
-						return FuncInfo{}, false
-					}
-				}
-				if t.onEntry {
-					fn.trace = append(fn.trace, t)
-					pos[idx] = len(fn.trace) - 1
-					isEntry[idx] = true
-				} else {
-					fn.retTrace = append(fn.retTrace, t)
-					pos[idx] = len(fn.retTrace) - 1
-					isEntry[idx] = false
-				}
+			fn.InitArgsRet()
+			for _, data := range expr.Datas {
+				fn.GenTraceData(data)
 			}
-			if len(fn.trace) > 5 {
-				fn.trace = fn.trace[:5]
-				fmt.Printf("current traceData exceed max 5 limit\n")
+			if len(fn.trace) > MaxTraceCount {
+				fn.trace = fn.trace[:MaxTraceCount]
+				fmt.Printf("current traceData exceed max %d limit\n", MaxTraceCount)
 			}
-			if len(fn.retTrace) > 5 {
-				fn.retTrace = fn.retTrace[:5]
-				fmt.Printf("current retTraceData exceed max 5 limit\n")
+			if len(fn.retTrace) > MaxTraceCount {
+				fn.retTrace = fn.retTrace[:MaxTraceCount]
+				fmt.Printf("current retTraceData exceed max %d limit\n", MaxTraceCount)
 			}
 			return fn, true
 		}
 	}
-	return FuncInfo{}, false
+	return nil, false
 }
 
-func (fg *FuncGraph) matchSymByDwarf(sym Symbol, funcsOfDwarf map[Symbol]struct{}, isEntry bool) (FuncInfo, bool) {
+func (fg *FuncGraph) matchSymByDwarf(sym Symbol, funcsOfDwarf map[Symbol]struct{}, isEntry bool) (*FuncInfo, bool) {
 	symD := Symbol{
 		Name:   sym.Name,
 		Addr:   0,
@@ -281,22 +246,23 @@ func (fg *FuncGraph) matchSymByDwarf(sym Symbol, funcsOfDwarf map[Symbol]struct{
 	if _, ok := funcsOfDwarf[symD]; ok {
 		id, info := fg.findBTFInfo(sym)
 		if info == nil {
-			return FuncInfo{}, false
+			return nil, false
 		}
-		fn := FuncInfo{
-			isEntry: isEntry,
+		fn := &FuncInfo{
+			IsEntry: isEntry,
 			Symbol:  sym,
 			id:      id,
-			btfinfo: info,
+			Btfinfo: info,
 		}
+		fn.InitArgsRet()
 		return fn, true
 	}
 
-	return FuncInfo{}, false
+	return nil, false
 
 }
 
-func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (FuncInfo, bool) {
+func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (*FuncInfo, bool) {
 	for _, name := range globs {
 		mod := ""
 		s := strings.SplitN(name, ":", 2)
@@ -309,19 +275,20 @@ func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (
 			if mod == sym.Module {
 				id, info := fg.findBTFInfo(sym)
 				if info == nil {
-					return FuncInfo{}, false
+					return nil, false
 				}
-				fn := FuncInfo{
-					isEntry: isEntry,
+				fn := &FuncInfo{
+					IsEntry: isEntry,
 					Symbol:  sym,
 					id:      id,
-					btfinfo: info,
+					Btfinfo: info,
 				}
+				fn.InitArgsRet()
 				return fn, true
 			}
 		}
 	}
-	return FuncInfo{}, false
+	return nil, false
 }
 
 func (fg *FuncGraph) findBTFInfo(sym Symbol) (btf.TypeID, *btf.Func) {
@@ -455,10 +422,10 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 		// if fg.funcs[i].isEntry == fg.funcs[j].isEntry {
 		// 	return fg.funcs[i].Name < fg.funcs[j].Name
 		// }
-		return fg.funcs[i].isEntry
+		return fg.funcs[i].IsEntry
 	})
 
-	if len(fg.funcs) == 0 || !fg.funcs[0].isEntry {
+	if len(fg.funcs) == 0 || !fg.funcs[0].IsEntry {
 
 		return fmt.Errorf("no entry function")
 	}
@@ -593,10 +560,19 @@ func (fg *FuncGraph) load() error {
 		spec.Programs["funcentry"].AttachType = ebpf.AttachTraceKprobeMulti
 		spec.Programs["funcret"].AttachType = ebpf.AttachTraceKprobeMulti
 	}
+
+	// opts := &ebpf.CollectionOptions{
+
+	// 	Programs: ebpf.ProgramOptions{
+	// 		LogLevel: ebpf.LogLevelBranch,
+	// 		LogSize:  math.MaxUint32 >> 2,
+	// 	},
+	// }
 	if err := spec.LoadAndAssign(&fg.objs, nil); err != nil {
 		var verifyError *ebpf.VerifierError
 		if errors.As(err, &verifyError) {
 			fmt.Println(strings.Join(verifyError.Log, "\n"))
+			// fmt.Printf("%+v\n", verifyError)
 		}
 		return fmt.Errorf("spec LoadAndAssign: %w", err)
 	}
@@ -605,57 +581,54 @@ func (fg *FuncGraph) load() error {
 
 	for _, fn := range fg.funcs {
 
-		b, _ := unix.ByteSliceFromString(fn.Name)
-		var name [40]uint8
-		copy(name[:], b)
-		name[len(name)-1] = 0
+		// b, _ := unix.ByteSliceFromString(fn.Name)
+		var name [40]int8
+		for i := 0; i < 40 && i < len(fn.Name); i++ {
+			name[i] = int8(fn.Name[i])
+		}
+		// copy(name[:], b)
+		// name[len(name)-1] = 0
 		f := funcgraphFunc{
 			Id:          uint32(fn.id),
-			IsMainEntry: fn.isEntry,
+			IsMainEntry: fn.IsEntry,
 			Name:        name,
 		}
 		// f.TraceCnt = uint8(len(fn.trace))
 		for i, t := range fn.trace {
+			if i >= int(funcgraphTraceConstantMAX_TRACES) {
+				break
+			}
 			ft := funcgraphTraceData{
-				BaseAddr:    t.BaseAddr,
-				Para:        uint8(t.Para),
-				Base:        t.Base,
-				Index:       t.Index,
-				Scale:       t.Scale,
-				Imm:         t.Imm,
-				IsStr:       t.isStr,
-				FieldCnt:    uint8(len(t.Offsets)),
-				Offsets:     [20]uint32{},
-				Size:        uint16(t.Size),
-				IsSign:      t.isSign,
+				Arg:         uint32(t.argType),
+				ArgLoc:      t.IdxOff,
+				Size:        uint16(t.size),
+				BitOff:      t.bitOff,
+				BitSize:     t.bitSize,
+				Flags:       t.flags(),
 				CmpOperator: t.CmpOperator,
 				Target:      t.Target,
-				BitOff:      t.BitOff,
-				BitSize:     t.BitSize,
 			}
-			copy(ft.Offsets[:], t.Offsets)
+			copy(ft.Offsets[:], t.offsets)
+			ft.FieldCnt = uint8(len(t.offsets))
 			f.Trace[i] = ft
 			f.TraceCnt++
 		}
 		for i, t := range fn.retTrace {
+			if i >= int(funcgraphTraceConstantMAX_TRACES) {
+				break
+			}
 			ft := funcgraphTraceData{
-				BaseAddr:    t.BaseAddr,
-				Para:        uint8(t.Para),
-				Base:        t.Base,
-				Index:       t.Index,
-				Scale:       t.Scale,
-				Imm:         t.Imm,
-				IsStr:       t.isStr,
-				FieldCnt:    uint8(len(t.Offsets)),
-				Offsets:     [20]uint32{},
-				Size:        uint16(t.Size),
-				IsSign:      t.isSign,
+				Arg:         uint32(t.argType),
+				ArgLoc:      t.IdxOff,
+				Size:        uint16(t.size),
+				BitOff:      t.bitOff,
+				BitSize:     t.bitSize,
+				Flags:       t.flags(),
 				CmpOperator: t.CmpOperator,
 				Target:      t.Target,
-				BitOff:      t.BitOff,
-				BitSize:     t.BitSize,
 			}
-			copy(ft.Offsets[:], t.Offsets)
+			copy(ft.Offsets[:], t.offsets)
+			ft.FieldCnt = uint8(len(t.offsets))
 			f.RetTrace[i] = ft
 			f.RetTraceCnt++
 		}
@@ -855,12 +828,19 @@ func (fg *FuncGraph) Run() error {
 				Para:  entryEvent.Para,
 			}
 			if entryEvent.HaveData {
-				empty := fg.dataPool.Get().(*[5120]uint8)
-				e.Buf = empty
-				copy(e.Buf[:], unsafe.Slice(unsafe.SliceData(entryEvent.Buf[:]), 5120))
+				eventData := (*funcgraphEventData)(unsafe.Pointer(&entryEvent.Buf))
+				e.DataLen = eventData.DataLen
+				e.DataOff = eventData.DataOff
+				empty := fg.dataPool.Get().(*[MaxTraceDataLen]uint8)
+				e.Data = empty
+				copy(e.Data[:], unsafe.Slice(unsafe.SliceData(eventData.Data[:]), MaxTraceDataLen))
 			}
+			// funcInfo :=
+			// if entryEvent.HaveData {
+			// 	fmt.Printf("data %+v %+v %+v %+v\n", e.Data[:64], e.DataOff, e.DataLen, fg.idToFuncs[btf.TypeID(e.Id)])
+			// }
 
-			// fmt.Printf("receive funcevent %+v\n", funcEvent)
+			//fmt.Printf("receive funcevent %+v\n", funcEvent)
 			events := fg.taskToEvents[task]
 			events.Add(e)
 			fg.taskToEvents[task] = events
@@ -887,9 +867,12 @@ func (fg *FuncGraph) Run() error {
 			}
 
 			if retEvent.HaveData {
-				empty := fg.dataPool.Get().(*[5120]uint8)
-				e.Buf = empty
-				copy(e.Buf[:], unsafe.Slice(unsafe.SliceData(retEvent.Buf[:]), 5120))
+				eventData := (*funcgraphEventData)(unsafe.Pointer(&retEvent.Buf))
+				e.DataLen = eventData.DataLen
+				e.DataOff = eventData.DataOff
+				empty := fg.dataPool.Get().(*[MaxTraceDataLen]uint8)
+				e.Data = empty
+				copy(e.Data[:], unsafe.Slice(unsafe.SliceData(eventData.Data[:]), MaxTraceDataLen))
 			}
 
 			events := fg.taskToEvents[task]
@@ -968,10 +951,10 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 	fg.output.Write(fg.buf.Bytes())
 
 	for _, e := range *events {
-		if e.Buf != nil {
-			fg.dataPool.Put(e.Buf)
+		if e.Data != nil {
+			fg.dataPool.Put(e.Data)
 		}
-		e.Buf = nil
+		e.Data = nil
 	}
 	fg.eventsPool.Put(events)
 	fg.taskToEvents[event.Task] = nil
@@ -1032,31 +1015,14 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 					fg.buf.WriteString(sym.Module)
 					fg.buf.WriteString("] ")
 				}
-				fg.ShowFuncPara(e)
-				fg.buf.WriteByte(' ')
-				fg.ShowFuncRet(ret)
+				funcInfo.ShowPara(e, fg.opt, fg.buf)
+				// fg.ShowFuncPara(e)
+				funcInfo.ShowRet(ret, fg.opt, fg.buf)
+				// fg.ShowFuncRet(ret)
 				fg.buf.WriteByte('\n')
-				for idx, t := range funcInfo.trace {
-					off := idx * 1024
-					sz := t.Size
-					if sz > 1024 {
-						sz = 1024
-					}
-					fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(10+e.Depth))
-					fg.opt.dumpDataByBTF(t.Name, t.Typ, 0, int(t.BitOff), int(t.BitSize))
-					fg.buf.WriteString(fg.opt.String())
-				}
-
-				for idx, t := range funcInfo.retTrace {
-					off := idx * 1024
-					sz := t.Size
-					if sz > 1024 {
-						sz = 1024
-					}
-					fg.opt.Reset(ret.Buf[off:off+sz], t.isStr, int(10+e.Depth))
-					fg.opt.dumpDataByBTF(t.Name, t.Typ, 0, int(t.BitOff), int(t.BitSize))
-					fg.buf.WriteString(fg.opt.String())
-				}
+				//time.Sleep(5 * time.Minute)
+				funcInfo.ShowTrace(e, fg.opt, fg.buf)
+				funcInfo.ShowRetTrace(ret, fg.opt, fg.buf)
 
 				i++
 				prevSeqId = ret.SeqId
@@ -1079,18 +1045,9 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 					fg.buf.WriteString(sym.Module)
 					fg.buf.WriteString("] ")
 				}
-				fg.ShowFuncPara(e)
+				funcInfo.ShowPara(e, fg.opt, fg.buf)
 				fg.buf.WriteByte('\n')
-				for idx, t := range funcInfo.trace {
-					off := idx * 1024
-					sz := t.Size
-					if sz > 1024 {
-						sz = 1024
-					}
-					fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(10+e.Depth))
-					fg.opt.dumpDataByBTF(t.Name, t.Typ, 0, int(t.BitOff), int(t.BitSize))
-					fg.buf.WriteString(fg.opt.String())
-				}
+				funcInfo.ShowTrace(e, fg.opt, fg.buf)
 			}
 		} else {
 			id := strconv.FormatInt(int64(e.CpuId), 10)
@@ -1118,130 +1075,11 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 				fg.buf.WriteString(sym.Module)
 				fg.buf.WriteString("] ")
 			}
-			fg.ShowFuncRet(e)
+			funcInfo.ShowRet(e, fg.opt, fg.buf)
 			fg.buf.WriteByte('\n')
-			for idx, t := range funcInfo.retTrace {
-				off := idx * 1024
-				sz := t.Size
-				if sz > 1024 {
-					sz = 1024
-				}
-				fg.opt.Reset(e.Buf[off:off+sz], t.isStr, int(10+e.Depth))
-				fg.opt.dumpDataByBTF(t.Name, t.Typ, 0, int(t.BitOff), int(t.BitSize))
-				fg.buf.WriteString(fg.opt.String())
-			}
+			funcInfo.ShowRetTrace(e, fg.opt, fg.buf)
 
 		}
 	}
 	fg.buf.WriteByte('\n')
-}
-
-func (fg *FuncGraph) ShowFuncPara(e *FuncEvent) {
-
-	if e.Id == 0 {
-		fmt.Fprintf(fg.buf, "%#x %#x %#x", e.Para[0], e.Para[1], e.Para[2])
-		return
-	}
-
-	funcInfo := fg.idToFuncs[btf.TypeID(e.Id)]
-	bFunc := funcInfo.btfinfo
-	bFuncProto := bFunc.Type.(*btf.FuncProto)
-	var n [1024]byte
-
-	for i, p := range bFuncProto.Params {
-		if i >= 5 {
-			break
-		}
-		if i != 0 {
-			fg.buf.WriteByte(' ')
-		}
-		typ := btf.UnderlyingType(p.Type)
-		switch t := typ.(type) {
-		case *btf.Pointer:
-			fg.buf.WriteString(p.Name)
-			fg.buf.WriteString("=0x")
-			b := n[:0]
-			b = strconv.AppendUint(b, e.Para[i], 16)
-			fg.buf.Write(b)
-			// fmt.Fprintf(s, "%s=%#x", p.Name, e.Para[i])
-		case *btf.Int:
-			b := n[:0]
-			switch {
-			case t.Encoding == btf.Signed && t.Size == 4:
-				b = strconv.AppendInt(b, int64(int32(e.Para[i])), 10)
-				// fmt.Fprintf(s, "%s=%v", p.Name, int32(e.Para[i]))
-			case t.Encoding == btf.Signed && t.Size == 8:
-				b = strconv.AppendInt(b, int64(e.Para[i]), 10)
-				// fmt.Fprintf(s, "%s=%v", p.Name, int64(e.Para[i]))
-			case t.Encoding == btf.Unsigned && t.Size == 4:
-				b = strconv.AppendUint(b, uint64(uint32(e.Para[i])), 10)
-				// fmt.Fprintf(s, "%s=%v", p.Name, uint32(e.Para[i]))
-			case t.Encoding == btf.Unsigned && t.Size == 8:
-				b = strconv.AppendUint(b, uint64((e.Para[i])), 10)
-				// fmt.Fprintf(s, "%s=%v", p.Name, uint64(e.Para[i]))
-			case t.Encoding == btf.Char:
-				b = strconv.AppendUint(b, uint64(byte(e.Para[i])), 10)
-				// fmt.Fprintf(s, "%s=%v", p.Name, byte(e.Para[i]))
-			case t.Encoding == btf.Bool:
-				if e.Para[i] != 0 {
-					b = append(b, "true"...)
-				} else {
-					b = append(b, "false"...)
-				}
-				// fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i] != 0)
-			default:
-				b = strconv.AppendUint(b, e.Para[i], 10)
-				// fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i])
-			}
-			fg.buf.WriteString(p.Name)
-			fg.buf.WriteString("=")
-			fg.buf.Write(b)
-		default:
-			fg.buf.WriteString(p.Name)
-			fg.buf.WriteString("=")
-			b := n[:0]
-			b = strconv.AppendUint(b, e.Para[i], 10)
-			fg.buf.Write(b)
-			// fmt.Fprintf(s, "%s=%v", p.Name, e.Para[i])
-		}
-	}
-
-}
-
-func (fg *FuncGraph) ShowFuncRet(e *FuncEvent) {
-	if e.Id == 0 {
-		fmt.Fprintf(fg.buf, "%#x", e.Ret)
-		return
-	}
-	fg.buf.WriteString("ret=")
-	funcInfo := fg.idToFuncs[btf.TypeID(e.Id)]
-	bFunc := funcInfo.btfinfo
-	bFuncProto := bFunc.Type.(*btf.FuncProto)
-	typ := btf.UnderlyingType(bFuncProto.Return)
-	switch t := typ.(type) {
-	case *btf.Int:
-		switch {
-		case t.Encoding == btf.Signed && t.Size == 4:
-			fmt.Fprintf(fg.buf, "%v", int32(e.Ret))
-		case t.Encoding == btf.Signed && t.Size == 8:
-			fmt.Fprintf(fg.buf, "%v", int64(e.Ret))
-		case t.Encoding == btf.Unsigned && t.Size == 4:
-			fmt.Fprintf(fg.buf, "%v", uint32(e.Ret))
-		case t.Encoding == btf.Unsigned && t.Size == 8:
-			fmt.Fprintf(fg.buf, "%v", uint64(e.Ret))
-		case t.Encoding == btf.Char:
-			fmt.Fprintf(fg.buf, "%v", byte(e.Ret))
-		case t.Encoding == btf.Bool:
-			fmt.Fprintf(fg.buf, "%v", e.Ret != 0)
-		default:
-			fmt.Fprintf(fg.buf, "%d", e.Ret)
-		}
-	case *btf.Pointer:
-		fmt.Fprintf(fg.buf, "%#x", e.Ret)
-	case *btf.Void:
-		fg.buf.WriteString("void")
-	default:
-		fmt.Fprintf(fg.buf, "%v", e.Ret)
-	}
-
 }
