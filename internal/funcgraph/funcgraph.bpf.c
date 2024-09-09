@@ -42,6 +42,8 @@ enum trace_constant {
 #define RET_EVENT_SUCCESS 6
 #define RET_EVENT_DROP 7
 
+#define vlog(fmt, ...) do { if (verbose) { bpf_printk(fmt, ##__VA_ARGS__); }  } while (0)
+
 volatile const bool verbose = false;
 volatile const bool has_bpf_get_func_ip = false;
 volatile const u64 kret_offset = 0;
@@ -303,16 +305,27 @@ static __always_inline void update_event_stat(u64 event_type) {
     return;
 }
 
-static __always_inline void print_event(struct call_event *e, char *when) {
-    bpf_printk("============= %s: EVENT DETAIL =============", when);
-    bpf_printk("============= addr: %llx", e);
-    bpf_printk("============= pid: %d tid: %d", e->pid, e->tid);
-    bpf_printk("============= start_time: %lld end_time: %lld", e->start_time,
-               e->end_time);
-    bpf_printk("============= depth: %d", e->depth);
-    for (int i = 0; i < 5; i++) {
-        bpf_printk("============= ips[%d]: %llx", i, e->ips[i]);
+static __always_inline void print_call_event(struct call_event *e, char *when) {
+    bpf_printk("============= CALL EVENT DETAIL =============");
+    bpf_printk("when: %s", when);
+    bpf_printk("addr: 0x%px task_struct: 0x%px", e, e->task);
+    bpf_printk("pid: %d tid: %d comm: %s", e->pid, e->tid, e->comm);
+    bpf_printk("start_time: %lld end_time: %lld", e->start_time, e->end_time);
+    bpf_printk("depth: %llu next_seq_id: %llu", e->depth, e->next_seq_id);
+    for (int i = 0; i <= e->depth && i < MAX_STACK_DEPTH; i++) {
+        bpf_printk("ips[%d]: %pS", i, e->ips[i]);
     }
+    for (int i = 0; i <= e->depth && i < MAX_STACK_DEPTH; i++) {
+        bpf_printk("durations[%d]: %llu", i, e->durations[i]);
+    }
+    return;
+}
+
+static __always_inline void print_entry_event(struct func_entry_event *e) {
+    bpf_printk("============= ENTRY EVENT DETAIL =============");
+    bpf_printk("addr: 0x%px task_struct: 0x%px", e, e->task);
+    bpf_printk("depth: %llu seq_id: %llu", e->depth, e->seq_id);
+    bpf_printk("ip: %pS func_id: %u", e->ip, e->id);
     return;
 }
 
@@ -681,7 +694,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
     u64 ip = get_kprobe_func_ip(ctx);
     struct func *fn = bpf_map_lookup_elem(&func_info, &ip);
     if (!fn) {
-        bpf_printk("no func info for kprobe addr %llx", ip);
+        bpf_printk("no func info for kprobe addr 0x%px", ip);
         return 0;
     }
 
@@ -695,11 +708,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
     e = bpf_map_lookup_elem(&call_events, &task);
     if (!e) {
         if (fn->is_main_entry == false) {
-            if (verbose) {
-                bpf_printk(
-                    "func %s will not be traced when first time creating event",
-                    (char *)&fn->name);
-            }
+            vlog("non-main-entry func %s will not be traced when first time creating event", fn->name);
             return 0;
         }
 
@@ -721,11 +730,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
                 entry_info->have_data = true;
                 extract_data(ctx, false, fn, entry_info->buf);
                 if (trace_data_allowed(&entry_info->buf[0], fn, false) == false) {
-                    if (verbose) {
-                        bpf_printk(
-                            "func %s will not be traced since it was filtered",
-                            (char *)&fn->name);
-                    }
+                    vlog("func %s will not be traced since it was filtered", fn->name);
                     bpf_ringbuf_discard(entry_info, 0);
                     return 0;
                 }
@@ -746,11 +751,8 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
         struct task_struct *tsk = (struct task_struct *)task;
         BPF_CORE_READ_INTO(&e->group_comm, tsk, group_leader, comm);
         e->start_time = bpf_ktime_get_ns();
-        e->next_seq_id = 1;
-        if (verbose) {
-            bpf_printk("create event %llx depth %d entry func %s", e, e->depth,
-                       (char *)&fn->name);
-        }
+        e->next_seq_id = 0;
+        vlog("create event 0x%px depth %d entry func %s", e, e->depth, fn->name);
         struct start_event *start_info;
         start_info =
             bpf_ringbuf_reserve(&events, sizeof(struct start_event), 0);
@@ -769,20 +771,15 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
     u64 d = e->depth;
     barrier_var(d);
     if (d >= max_depth || d >= MAX_STACK_DEPTH) {
-        if (verbose) {
-            bpf_printk("funcentry event %llx depth %d exceed %d", e, e->depth,
-                       MAX_STACK_DEPTH);
-        }
+        vlog("funcentry event %px depth %d exceed %d", e, e->depth, MAX_STACK_DEPTH);
         e->depth = d + 1;
         return 0;
     }
 
     if (d == 0 && fn->is_main_entry == false) {
-        bpf_printk(
-            "func %s which will be record at depth %d is not entry function",
-            (char *)&fn->name, d);
+        vlog("func %s at depth 0 is not entry function",fn->name);
         if (verbose) {
-            print_event(e, "ABNORMAL");
+            print_call_event(e, "NON-MAIN-ENTRY-FUNC");
         }
         bpf_map_delete_elem(&call_events, &task);
         return 0;
@@ -806,6 +803,9 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
             entry_info->time = bpf_ktime_get_ns();
             extract_func_paras(entry_info, ctx);
             entry_info->have_data = false;
+            if (verbose) {
+                print_entry_event(entry_info);
+            }
             bpf_ringbuf_submit(entry_info, 0);
         }
     } else {
@@ -827,6 +827,9 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
             extract_func_paras(entry_info, ctx);
             entry_info->have_data = true;
             extract_data(ctx, false, fn, entry_info->buf);
+            if (verbose) {
+                print_entry_event(entry_info);
+            }
             bpf_ringbuf_submit(entry_info, 0);
         }
     }
@@ -836,7 +839,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
     e->durations[d] = bpf_ktime_get_ns();
     e->depth = d + 1;
     if (verbose) {
-        print_event(e, "FUNCENTRY");
+        print_call_event(e, "FUNCENTRY");
     }
 
     return 0;
@@ -878,34 +881,28 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
     u64 task = bpf_get_current_task();
     e = bpf_map_lookup_elem(&call_events, &task);
     if (!e) {
-        if (verbose) {
-            bpf_printk("no event when kretprobe func %s", (char *)&fn->name);
-        }
+        vlog("no call event when kretprobe func %s", fn->name);
         return 0;
     }
 
     u64 d = e->depth;
     if (d == 0) {
-        bpf_printk("shoud not depth 0 during kretprobe func %s", task,
-                   (char *)&fn->name);
+        vlog("shoud not depth 0 during kretprobe func %s", task, fn->name);
         return 0;
     }
     d -= 1;
     barrier_var(d);
     if (d >= max_depth || d >= MAX_STACK_DEPTH) {
-        if (verbose) {
-            bpf_printk("funcret depth %d exceed %d", d, MAX_STACK_DEPTH);
-        }
+        vlog("funcret depth %d exceed %d", d, MAX_STACK_DEPTH);
         e->depth = d;
         return 0;
     }
 
     u64 prev = e->ips[d];
     if (prev != ip) {
+        vlog("kprobe ip %llx is not enqual to kretprobe ip %llx", prev, ip);
         if (verbose) {
-            bpf_printk("kprobe ip %llx is not enqual to kretprobe ip %llx",
-                       prev, ip);
-            print_event(e, "ABNORMAL");
+            print_call_event(e, "RET ABNORMAL");
         }
         bpf_map_delete_elem(&call_events, &task);
         return 0;
@@ -980,9 +977,6 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
         if (!call_info) {
             update_event_stat(CALL_EVENT_DROP);
             bpf_map_delete_elem(&call_events, &task);
-            if (verbose) {
-                print_event(e, "NO-SEND RINGBUF");
-            }
             return 0;
         }
         update_event_stat(CALL_EVENT_SUCCESS);
@@ -991,14 +985,14 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
                                              sizeof(call_info->kstack), 0);
         bpf_ringbuf_submit(call_info, 0);
         bpf_map_delete_elem(&call_events, &task);
+        vlog("send event %llx and delete it", e);
         if (verbose) {
-            bpf_printk("send event %llx and delete it", e);
-            print_event(e, "SEND RINGBUF");
+            print_call_event(e, "SEND RINGBUF");
         }
         return 0;
     }
     if (verbose) {
-        print_event(e, "FUNCRET");
+        print_call_event(e, "FUNCRET");
     }
     return 0;
 }
