@@ -591,7 +591,7 @@ func (fg *FuncGraph) load() error {
 		return fmt.Errorf("spec LoadAndAssign: %w", err)
 	}
 
-	fmt.Printf("%+v %s\n", fg.objs, err)
+	// fmt.Printf("%+v %s\n", fg.objs, err)
 
 	for _, fn := range fg.funcs {
 
@@ -665,7 +665,6 @@ func (fg *FuncGraph) load() error {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -696,10 +695,11 @@ func (fg *FuncGraph) Run() error {
 		fmt.Printf("will not run when run dry run mode\n")
 		return nil
 	}
-
+	start := time.Now()
 	if err := fg.load(); err != nil {
 		return err
 	}
+	fmt.Printf("load ebpf and update maps take %s\n", time.Since(start))
 
 	if fg.mode != "kprobe" && fg.haveKprobeMulti {
 		addrs := []uintptr{}
