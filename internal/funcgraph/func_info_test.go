@@ -23,7 +23,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{},
 						First:       Primary{Name: "skb"},
 						Fields:      nil,
-						SohwString:  false,
+						ShowString:  false,
 						CompareInfo: Compare{},
 					},
 					{
@@ -31,7 +31,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{},
 						First:       Primary{Name: "skb"},
 						Fields:      []Field{{Name: "head"}},
-						SohwString:  false,
+						ShowString:  false,
 						CompareInfo: Compare{},
 					},
 					{
@@ -39,7 +39,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{},
 						First:       Primary{Name: "skb"},
 						Fields:      []Field{{Name: "transport_header"}},
-						SohwString:  false,
+						ShowString:  false,
 						CompareInfo: Compare{},
 					},
 					{
@@ -47,7 +47,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{Name: "tcphdr"},
 						First:       Primary{Addr: Addr{Base: 1, Index: 2, Scale: 1, Imm: 0}},
 						Fields:      []Field{{Name: "syn"}},
-						SohwString:  false,
+						ShowString:  false,
 						CompareInfo: Compare{
 							Operator:  "==",
 							Threshold: Value{s: "1"},
@@ -66,7 +66,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{},
 						First:       Primary{Name: "pathname"},
 						Fields:      []Field{{Name: "name"}},
-						SohwString:  true,
+						ShowString:  true,
 						CompareInfo: Compare{
 							Operator:  "==",
 							Threshold: Value{s: `"/etc/hosts"`},

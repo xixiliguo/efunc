@@ -205,12 +205,16 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 	return fg, nil
 }
 
-func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool) (*FuncInfo, bool) {
+func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool) (*FuncInfo, bool, error) {
 	for _, expr := range exprs {
 		if sym.Module == expr.Module && sym.Name == expr.Name {
 			id, info := fg.findBTFInfo(sym)
 			if info == nil {
-				return nil, false
+				m := ""
+				if expr.Module != "" {
+					m = expr.Module + ":"
+				}
+				return nil, false, fmt.Errorf("%s%s has no available btf info", m, expr.Name)
 			}
 			fn := &FuncInfo{
 				IsEntry: isEntry,
@@ -220,7 +224,9 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 			}
 			fn.InitArgsRet()
 			for _, data := range expr.Datas {
-				fn.GenTraceData(data)
+				if err := fn.GenTraceData(data); err != nil {
+					return nil, false, err
+				}
 			}
 			if len(fn.trace) > MaxTraceCount {
 				fn.trace = fn.trace[:MaxTraceCount]
@@ -230,10 +236,10 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 				fn.retTrace = fn.retTrace[:MaxTraceCount]
 				fmt.Printf("current retTraceData exceed max %d limit\n", MaxTraceCount)
 			}
-			return fn, true
+			return fn, true, nil
 		}
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 func (fg *FuncGraph) matchSymByDwarf(sym Symbol, funcsOfDwarf map[Symbol]struct{}, isEntry bool) (*FuncInfo, bool) {
@@ -245,16 +251,18 @@ func (fg *FuncGraph) matchSymByDwarf(sym Symbol, funcsOfDwarf map[Symbol]struct{
 
 	if _, ok := funcsOfDwarf[symD]; ok {
 		id, info := fg.findBTFInfo(sym)
-		if info == nil {
-			return nil, false
-		}
+		// if info == nil {
+		// 	return nil, false
+		// }
 		fn := &FuncInfo{
 			IsEntry: isEntry,
 			Symbol:  sym,
 			id:      id,
 			Btfinfo: info,
 		}
-		fn.InitArgsRet()
+		if info != nil {
+			fn.InitArgsRet()
+		}
 		return fn, true
 	}
 
@@ -274,16 +282,18 @@ func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (
 
 			if mod == sym.Module {
 				id, info := fg.findBTFInfo(sym)
-				if info == nil {
-					return nil, false
-				}
+				// if info == nil {
+				// 	return nil, false
+				// }
 				fn := &FuncInfo{
 					IsEntry: isEntry,
 					Symbol:  sym,
 					id:      id,
 					Btfinfo: info,
 				}
-				fn.InitArgsRet()
+				if info != nil {
+					fn.InitArgsRet()
+				}
 				return fn, true
 			}
 		}
@@ -350,7 +360,9 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 			continue
 		}
 
-		if fn, match := fg.matchSymByExpr(sym, opt.EntryFuncExprs, true); match {
+		if fn, match, err := fg.matchSymByExpr(sym, opt.EntryFuncExprs, true); err != nil {
+			return err
+		} else if match {
 			if _, ok := dup[sym.Module+sym.Name]; ok {
 				continue
 			}
@@ -383,7 +395,9 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 			continue
 		}
 
-		if fn, match := fg.matchSymByExpr(sym, opt.AllowFuncExprs, false); match {
+		if fn, match, err := fg.matchSymByExpr(sym, opt.AllowFuncExprs, false); err != nil {
+			return err
+		} else if match {
 			if _, ok := dup[sym.Module+sym.Name]; ok {
 				continue
 			}

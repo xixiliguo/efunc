@@ -2,17 +2,11 @@ package funcgraph
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"os"
 	"runtime"
-	"strconv"
 	"strings"
-	"sync"
 	"unsafe"
 
-	"github.com/alecthomas/participle/v2"
-	"github.com/alecthomas/participle/v2/lexer"
 	"github.com/cilium/ebpf/btf"
 )
 
@@ -22,76 +16,6 @@ const (
 	MaxTraceDataLen = int(funcgraphTraceConstantMAX_TRACE_BUF)
 	MaxTraceCount   = int(funcgraphTraceConstantMAX_TRACES)
 )
-
-// support module symbol later
-type FuncExpr struct {
-	Module string     `parser:"(@Ident Colon)?"`
-	Name   string     `parser:"@Ident"`
-	Datas  []DataExpr `parser:"(LeftEdge@@(Whitespace? Separator Whitespace? @@)*RightEdge)?"`
-}
-
-type DataExpr struct {
-	Dereference bool     `parser:"@DereferenceOperator?"`
-	Typ         CastType `parser:"(LeftEdge Struct Whitespace @@ Whitespace DereferenceOperator RightEdge)?"`
-	First       Primary  `parser:"@@"`
-	Fields      []Field  `parser:"@@*"`
-	SohwString  bool     `parser:"@ShowString?"`
-	CompareInfo Compare  `parser:"@@?"`
-}
-
-type CastType struct {
-	Moudle string `parser:"(@Ident Colon)?"`
-	Name   string `parser:"@Ident"`
-}
-
-type Primary struct {
-	Name string `parser:"@Ident"`
-	Addr Addr   `parser:"| LeftEdge @@ RightEdge"`
-}
-
-type Addr struct {
-	Base  uint32 `parser:"@Number"`
-	Index uint32 `parser:"Separator @Number"`
-	Scale int32  `parser:"Separator @Number"`
-	Imm   int32  `parser:"Separator @Number"`
-}
-
-type Field struct {
-	Name string `parser:"ArrowOperator@(Ident (Period Ident)*)"`
-}
-
-type Compare struct {
-	Operator  string `parser:"Whitespace@Operator"`
-	Threshold Value  `parser:"Whitespace@(String|Number)"`
-}
-
-type Value struct {
-	s string
-}
-
-func (v *Value) Capture(values []string) error {
-	v.s = values[0]
-	return nil
-}
-
-func (v Value) String() string {
-	return v.s
-}
-
-func (v Value) ShowString() (string, error) {
-	if len(v.s) >= 3 && v.s[0] == '"' && v.s[len(v.s)-1] == '"' {
-		return v.s[1 : len(v.s)-1], nil
-	}
-	return "", errors.New("should not empty string")
-}
-
-func (v Value) ShowSignNumber() (int64, error) {
-	return strconv.ParseInt(v.s, 0, 64)
-}
-
-func (v Value) ShowUnsignNumber() (uint64, error) {
-	return strconv.ParseUint(v.s, 0, 64)
-}
 
 type Arg struct {
 	Type   ArgType
@@ -165,7 +89,13 @@ func (f *FuncInfo) InitArgsRet() {
 func (f *FuncInfo) ShowPara(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 
 	if e.Id == 0 {
-		fmt.Fprintf(dst, "%#x %#x %#x", 1, 2, 3)
+		fmt.Fprintf(dst, "rdi=%#x rsi=%#x rdx=%#x rcx=%#x r8=%#x r9=%#x ",
+			e.Para[0],
+			e.Para[1],
+			e.Para[2],
+			e.Para[3],
+			e.Para[4],
+			e.Para[5])
 		return
 	}
 
@@ -195,7 +125,7 @@ func (f *FuncInfo) ShowPara(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 
 func (f *FuncInfo) ShowRet(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 	if e.Id == 0 {
-		fmt.Fprintf(dst, "%#x", e.Ret)
+		fmt.Fprintf(dst, "rax=%#x", e.Ret[0])
 		return
 	}
 
@@ -259,10 +189,18 @@ func (f *FuncInfo) ShowRetTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer
 	}
 }
 
-func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
+func (f *FuncInfo) String() string {
+	m := ""
+	if f.Module != "" {
+		m = f.Module + ":"
+	}
+	return m + f.Name
+}
+
+func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 
 	fn := f.Btfinfo
-	fmt.Printf("generate TraceData of %+v with %+v\n", dataExpr, fn)
+	// fmt.Printf("generate TraceData of %+v with %+v\n", dataExpr, fn)
 	t := &TraceData{}
 	var btfData btf.Type
 	proto := fn.Type.(*btf.FuncProto)
@@ -281,9 +219,8 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 					break
 				}
 			}
-			if t.onEntry && len(f.retTrace) > 1 {
-				fmt.Printf("entry expr must be before ret expr: %+v\n", t)
-				os.Exit(1)
+			if t.onEntry && len(f.retTrace) != 0 {
+				return fmt.Errorf("entry expr must precede ret expr")
 			}
 		} else {
 			t.name = "ret"
@@ -294,7 +231,9 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 			t.typ = proto.Return
 			btfData = proto.Return
 		}
-
+		if t.name == "" {
+			return fmt.Errorf("%v is not parameter of %s", dataExpr.First.Name, fn)
+		}
 	} else {
 		t.name = fmt.Sprintf("(struct %s *)(%d,%d,%d,%d)", dataExpr.Typ.Name,
 			dataExpr.First.Addr.Base,
@@ -304,7 +243,6 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 		if len(dataExpr.Fields) != 0 {
 			t.name = "(" + t.name + ")"
 		}
-		// t.Arg = uint64(ARG_ADDR) << 60
 
 		t.onEntry = true
 		maxIdx := len(f.trace)
@@ -314,17 +252,17 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 		}
 
 		if dataExpr.First.Addr.Base >= uint32(maxIdx) {
-			fmt.Printf("%+v base idx %d exceed range: %+v \n", t, dataExpr.First.Addr.Base, maxIdx)
-			os.Exit(1)
+			return fmt.Errorf("parsing %s %q: base %d exceed range [0,%d)", f, dataExpr, dataExpr.First.Addr.Base, maxIdx)
 		}
 		if dataExpr.First.Addr.Index >= uint32(maxIdx) {
-			fmt.Printf("%+v index idx %d exceed range: %+v \n", t, dataExpr.First.Addr.Index, maxIdx)
-			os.Exit(1)
+			return fmt.Errorf("parsing %s %q: index %d exceed range [0,%d)", f, dataExpr, dataExpr.First.Addr.Index, maxIdx)
 		}
 		if dataExpr.First.Addr.Scale != 0 {
 			if dataExpr.First.Addr.Base == dataExpr.First.Addr.Index {
-				fmt.Printf("%+v base %d should not the same with index %+v \n", t, dataExpr.First.Addr.Base, dataExpr.First.Addr.Index)
-				os.Exit(1)
+				return fmt.Errorf("parsing %s %q: base %d equal to index %d", f,
+					dataExpr,
+					dataExpr.First.Addr.Base,
+					dataExpr.First.Addr.Index)
 			}
 		}
 
@@ -339,18 +277,8 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 			baseType = f.retTrace[base].typ
 		}
 		if _, ok := baseType.(*btf.Pointer); !ok {
-			fmt.Printf("Base type is not pointer\n")
-			os.Exit(1)
+			return fmt.Errorf("parsing %s %q: type(%s) of base is not pointer", f, dataExpr, baseType)
 		}
-
-		//5 + 5 + 14 + 16
-		// addr := uint64(0)
-		// addr |= uint64(base) << 35
-		// addr |= uint64(index) << 30
-		// addr |= uint64(dataExpr.First.Addr.Scale) << 16
-		// addr |= uint64(dataExpr.First.Addr.Imm)
-		// fmt.Printf("abc %+v  b %+v i %+v s %+v, i %+v\n", addr, base, index, dataExpr.First.Addr.Scale, dataExpr.First.Addr.Imm)
-		// t.Arg |= uint64(addr) << 16
 
 		t.argType = ADDR
 
@@ -359,18 +287,15 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 		t.IdxOff |= writeBits(t.IdxOff, uint32(funcgraphArgAddrSCALE_LEN), uint32(funcgraphArgAddrSCALE_SHIFT), scale)
 		t.IdxOff |= writeBits(t.IdxOff, uint32(funcgraphArgAddrIMM_LEN), uint32(funcgraphArgAddrIMM_SHIFT), imm)
 		t.size = 8
-		fmt.Printf("abc   b %+v i %+v s %+v, i %+v\n", base, index, dataExpr.First.Addr.Scale, dataExpr.First.Addr.Imm)
-		// t.onEntry = true
+
 		spec, err := LoadbtfSpec(dataExpr.Typ.Moudle)
 		if err != nil {
-			fmt.Printf("loadbtfSpec: %s\n", err)
-			os.Exit(1)
+			return fmt.Errorf("loadbtfSpec: %s", err)
 		}
 		structPtr := &btf.Struct{}
 		err = spec.TypeByName(dataExpr.Typ.Name, &structPtr)
 		if err != nil {
-			fmt.Printf("TypeByName %s: %s\n", dataExpr.Typ, err)
-			os.Exit(1)
+			return fmt.Errorf("parsing %s %q: %s", f, dataExpr, err)
 		}
 
 		pointer := &btf.Pointer{
@@ -383,62 +308,49 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 		dataExpr.Typ.Name = ""
 	}
 
-	fmt.Println(dataExpr.First, btfData)
+	// fmt.Println(dataExpr.First, btfData)
 
-	if btfData != nil {
-
-		genTraceDataByField(dataExpr.Fields, 0, btfData, t)
-
-		if dataExpr.Typ.Name != "" {
-			if _, ok := t.typ.(*btf.Pointer); ok {
-				spec, err := LoadbtfSpec(dataExpr.Typ.Moudle)
-				if err != nil {
-					fmt.Printf("loadbtfSpec: %s\n", err)
-					os.Exit(1)
-				}
-				structPtr := &btf.Struct{}
-				err = spec.TypeByName(dataExpr.Typ.Name, &structPtr)
-				if err != nil {
-					fmt.Printf("TypeByName %s: %s\n", dataExpr.Typ, err)
-					os.Exit(1)
-				}
-
-				pointer := &btf.Pointer{
-					Target: structPtr,
-				}
-				t.typ = pointer
-				t.name = fmt.Sprintf("(struct %s *)%s", dataExpr.Typ, t.name)
-
-			} else {
-				fmt.Printf("type cast only support pointer type: source type is %+v\n", t.typ)
-				os.Exit(1)
-			}
-		}
-
-		if dataExpr.Dereference {
-			btfData := btf.UnderlyingType(t.typ)
-			btfPointerData, ok := btfData.(*btf.Pointer)
-			if !ok {
-				fmt.Printf("%+v is not pointer type\n", btfData)
-				os.Exit(1)
-			}
-			t.typ = btfPointerData.Target
-			// t.Offsets = append(t.Offsets, 0)
-			t.isDefer = true
-			if sz, err := btf.Sizeof(t.typ); err == nil {
-				t.size = sz
-			} else {
-				fmt.Printf("%+v cannot get size: %s\n", t.typ, err)
-				os.Exit(1)
-			}
-			t.name = "*" + t.name
-		}
-
-	} else {
-		fmt.Printf("%+v is not parameter of %s\n", dataExpr.First, fn)
-		os.Exit(1)
+	if err := genTraceDataByField(dataExpr.Fields, 0, btfData, t); err != nil {
+		return fmt.Errorf("parsing %s %q: %w", f, dataExpr, err)
 	}
-	if dataExpr.SohwString {
+
+	if dataExpr.Typ.Name != "" {
+		if _, ok := t.typ.(*btf.Pointer); ok {
+			spec, err := LoadbtfSpec(dataExpr.Typ.Moudle)
+			if err != nil {
+				return fmt.Errorf("loadbtfSpec: %s", err)
+			}
+			structPtr := &btf.Struct{}
+			err = spec.TypeByName(dataExpr.Typ.Name, &structPtr)
+			if err != nil {
+				return fmt.Errorf("parsing %s %q: %s", f, dataExpr, err)
+			}
+
+			pointer := &btf.Pointer{
+				Target: structPtr,
+			}
+			t.typ = pointer
+			t.name = fmt.Sprintf("(struct %s *)%s", dataExpr.Typ, t.name)
+
+		} else {
+			return fmt.Errorf("parsing %s %q: type cast only support pointer type: source type is %+v", f, dataExpr, t.typ)
+		}
+	}
+
+	if dataExpr.Dereference {
+		btfData := btf.UnderlyingType(t.typ)
+		btfPointerData, ok := btfData.(*btf.Pointer)
+		if !ok {
+			return fmt.Errorf("parsing %s %q: can not dereference %s (non-pointer type)", f, dataExpr, btfData)
+		}
+		t.typ = btfPointerData.Target
+		// t.Offsets = append(t.Offsets, 0)
+		t.isDefer = true
+		t.size, _ = btf.Sizeof(t.typ)
+		t.name = "*" + t.name
+	}
+
+	if dataExpr.ShowString {
 		t.isStr = true
 		t.size = 1024
 	}
@@ -452,8 +364,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 				tb := (*[8]byte)(unsafe.Pointer(&t.Target))
 				copy(tb[:], target)
 			} else {
-				fmt.Printf("%s fail to get string: %s\n", threshold, err)
-				os.Exit(1)
+				return fmt.Errorf("parsing %s %q: %s fail to get string: %s", f, dataExpr, threshold, err)
 			}
 		} else {
 			switch typ := btf.UnderlyingType(t.typ).(type) {
@@ -466,14 +377,12 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 					n, err := threshold.ShowSignNumber()
 					t.Target = uint64(n)
 					if err != nil {
-						fmt.Printf("%s fail to ParseInt: %s\n", threshold, err)
-						os.Exit(1)
+						return fmt.Errorf("parsing %s %q: %s fail to ParseInt: %s", f, dataExpr, threshold, err)
 					}
 				} else {
 					t.Target, err = threshold.ShowUnsignNumber()
 					if err != nil {
-						fmt.Printf("%s fail to ParseUint: %s\n", threshold, err)
-						os.Exit(1)
+						return fmt.Errorf("parsing %s %q: %s fail to ParseUint: %s", f, dataExpr, threshold, err)
 					}
 				}
 
@@ -481,8 +390,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 				var err error
 				t.Target, err = threshold.ShowUnsignNumber()
 				if err != nil {
-					fmt.Printf("%s fail to ParseUint: %s\n", threshold, err)
-					os.Exit(1)
+					return fmt.Errorf("parsing %s %q: %s fail to ParseUint: %s", f, dataExpr, threshold, err)
 				}
 			case *btf.Enum:
 				if typ.Signed {
@@ -495,32 +403,30 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) {
 						}
 					}
 				} else {
-					fmt.Printf("%s fail to get string: %s\n", threshold, err)
-					os.Exit(1)
+					return fmt.Errorf("parsing %s %q: %s fail to get string: %s", f, dataExpr, threshold, err)
 				}
 			default:
-				fmt.Printf("%+v do not support cmp now\n", typ)
-				os.Exit(1)
+				return fmt.Errorf("parsing %s %q: %s do not support compare now", f, dataExpr, typ)
 			}
 		}
 	}
-	fmt.Printf("result: %+v\n\n", t)
+	// fmt.Printf("result: %+v\n\n", t)
 	if t.onEntry {
 		f.trace = append(f.trace, t)
 	} else {
 		f.retTrace = append(f.retTrace, t)
 	}
 
-	return
+	return nil
 }
 
 func mask(len uint32) uint32 {
 	return (1 << len) - 1
 }
 
-func readBits(value, len, shift uint32) uint32 {
-	return (value >> shift) & mask(len)
-}
+// func readBits(value, len, shift uint32) uint32 {
+// 	return (value >> shift) & mask(len)
+// }
 
 func writeBits(value, len, shift, new uint32) uint32 {
 	value &^= mask(len) << shift
@@ -566,19 +472,18 @@ func caculateOffset(name string, btfData btf.Type) (uint32, uint32, uint32, btf.
 	}
 }
 
-func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) {
+func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) error {
 	if idx >= len(fs) {
-		return
+		return nil
 	}
 	btfData = btf.UnderlyingType(btfData)
-	fmt.Printf("analyse %+v with %+v\n", fs[idx], btfData)
+	// fmt.Printf("analyse %+v with %+v\n", fs[idx], btfData)
 
 	f := fs[idx]
 
 	btfPointerData, ok := btfData.(*btf.Pointer)
 	if !ok {
-		fmt.Printf("%+v is not pointer type\n", btfData)
-		os.Exit(1)
+		return fmt.Errorf("%+v is not pointer type", btfData)
 	}
 
 	currStructType := btfPointerData.Target
@@ -589,8 +494,7 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) {
 		currStructType = btf.UnderlyingType(currStructType)
 		off, bitOff, bitSize, typ, found := caculateOffset(name, currStructType)
 		if !found {
-			fmt.Printf("%+v is not field of %+v\n", name, currStructType)
-			os.Exit(1)
+			return fmt.Errorf("%+v is not field of %s", name, currStructType)
 		}
 		currStructType = typ
 		offset += uint16(off)
@@ -605,41 +509,12 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) {
 	if sz, err := btf.Sizeof(currStructType); err == nil {
 		t.size = sz
 	} else {
-		fmt.Printf("%+v cannot get size: %s\n", currStructType, err)
-		os.Exit(1)
+		return fmt.Errorf("%+v cannot get size: %s", currStructType, err)
 	}
 
 	t.name += "->" + f.Name
 
-	genTraceDataByField(fs, idx+1, currStructType, t)
-
-}
-
-var funcParserFunc = sync.OnceValue[*participle.Parser[FuncExpr]](func() *participle.Parser[FuncExpr] {
-	clexer := lexer.MustSimple([]lexer.SimpleRule{
-		{Name: "DereferenceOperator", Pattern: `\*`},
-		{Name: "Struct", Pattern: `struct`},
-		{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z_0-9]*`},
-		{Name: "ArrowOperator", Pattern: `->`},
-		{Name: "ShowString", Pattern: `:str`},
-		{Name: "Whitespace", Pattern: `[ \t]+`},
-		{Name: "Colon", Pattern: `:`},
-		{Name: "Period", Pattern: `\.`},
-		{Name: "LeftEdge", Pattern: `\(`},
-		{Name: "RightEdge", Pattern: `\)`},
-		{Name: "Separator", Pattern: `,`},
-		{Name: "Operator", Pattern: `>=|>|==|!=|<=|<`},
-		{Name: "Number", Pattern: `([-+]?0x[a-zA-Z_0-9]+)|([-+]?\d+)`},
-		{Name: "String", Pattern: `".*"`},
-	})
-
-	parser, _ := participle.Build[FuncExpr](participle.Lexer(clexer))
-	return parser
-})
-
-func ParseFuncWithPara(s string) (*FuncExpr, error) {
-	p := funcParserFunc()
-	return p.ParseString("", s)
+	return genTraceDataByField(fs, idx+1, currStructType, t)
 }
 
 func ShowBtfFunc(fn *btf.Func) (s string) {
