@@ -13,6 +13,31 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type funcgraphArgAddr uint32
+
+const (
+	funcgraphArgAddrBASE_LEN    funcgraphArgAddr = 4
+	funcgraphArgAddrBASE_SHIFT  funcgraphArgAddr = 28
+	funcgraphArgAddrINDEX_LEN   funcgraphArgAddr = 4
+	funcgraphArgAddrINDEX_SHIFT funcgraphArgAddr = 24
+	funcgraphArgAddrSCALE_LEN   funcgraphArgAddr = 8
+	funcgraphArgAddrSCALE_SHIFT funcgraphArgAddr = 16
+	funcgraphArgAddrIMM_LEN     funcgraphArgAddr = 16
+	funcgraphArgAddrIMM_SHIFT   funcgraphArgAddr = 0
+)
+
+type funcgraphArgKind uint32
+
+const (
+	funcgraphArgKindREG       funcgraphArgKind = 0
+	funcgraphArgKindSTACK     funcgraphArgKind = 1
+	funcgraphArgKindADDR      funcgraphArgKind = 2
+	funcgraphArgKindRET_REG   funcgraphArgKind = 3
+	funcgraphArgKindRET_STACK funcgraphArgKind = 4
+	funcgraphArgKindREG_PTR   funcgraphArgKind = 5
+	funcgraphArgKindSTACK_PTR funcgraphArgKind = 6
+)
+
 type funcgraphCallEvent struct {
 	Type      uint8
 	_         [7]byte
@@ -31,19 +56,25 @@ type funcgraphCallEvent struct {
 	NextSeqId uint64
 }
 
+type funcgraphEventData struct {
+	DataLen uint16
+	DataOff [7]int16
+	Data    [0]uint8
+}
+
 type funcgraphFunc struct {
 	Id          uint32
 	IsMainEntry bool
-	Name        [40]uint8
+	Name        [40]int8
 	TraceCnt    uint8
 	_           [2]byte
-	Trace       [5]funcgraphTraceData
+	Trace       [7]funcgraphTraceData
 	RetTraceCnt uint8
 	_           [7]byte
-	RetTrace    [5]funcgraphTraceData
+	RetTrace    [7]funcgraphTraceData
 }
 
-type funcgraphFuncEntryEvent struct {
+type funcgraphFuncEvent struct {
 	Type     uint8
 	_        [7]byte
 	Task     uint64
@@ -53,31 +84,11 @@ type funcgraphFuncEntryEvent struct {
 	SeqId    uint64
 	Ip       uint64
 	Id       uint32
-	_        [4]byte
-	Time     uint64
-	Para     [5]uint64
 	HaveData bool
-	Buf      [0]uint8
-	_        [7]byte
-}
-
-type funcgraphFuncRetEvent struct {
-	Type     uint8
-	_        [7]byte
-	Task     uint64
-	CpuId    uint32
-	_        [4]byte
-	Depth    uint64
-	SeqId    uint64
-	Ip       uint64
-	Id       uint32
-	_        [4]byte
-	Time     uint64
+	_        [3]byte
 	Duration uint64
-	Ret      uint64
-	HaveData bool
-	Buf      [0]uint8
-	_        [7]byte
+	Records  [16]uint64
+	Buf      [0]funcgraphEventData
 }
 
 type funcgraphStartEvent struct {
@@ -86,24 +97,38 @@ type funcgraphStartEvent struct {
 	Task uint64
 }
 
+type funcgraphTraceConstant uint32
+
+const (
+	funcgraphTraceConstantPARA_LEN            funcgraphTraceConstant = 16
+	funcgraphTraceConstantMAX_TRACE_FIELD_LEN funcgraphTraceConstant = 5
+	funcgraphTraceConstantMAX_TRACES          funcgraphTraceConstant = 7
+	funcgraphTraceConstantMAX_TRACE_DATA      funcgraphTraceConstant = 1024
+	funcgraphTraceConstantMAX_TRACE_BUF       funcgraphTraceConstant = 5120
+)
+
 type funcgraphTraceData struct {
-	BaseAddr    bool
-	Para        uint8
-	Base        uint8
-	Index       uint8
-	Scale       int16
-	Imm         int16
-	IsStr       bool
+	ArgKind     funcgraphArgKind
+	ArgLoc      uint32
 	FieldCnt    uint8
-	_           [2]byte
-	Offsets     [20]uint32
+	_           [1]byte
+	Offsets     [5]uint16
 	Size        uint16
-	IsSign      bool
+	BitOff      uint8
+	BitSize     uint8
+	Flags       uint8
 	CmpOperator uint8
+	_           [6]byte
 	Target      uint64
-	BitOff      uint32
-	BitSize     uint32
 }
+
+type funcgraphTraceDataFlags uint32
+
+const (
+	funcgraphTraceDataFlagsDATA_STR   funcgraphTraceDataFlags = 1
+	funcgraphTraceDataFlagsDATA_DEREF funcgraphTraceDataFlags = 2
+	funcgraphTraceDataFlagsDATA_SIGN  funcgraphTraceDataFlags = 4
+)
 
 // loadFuncgraph returns the embedded CollectionSpec for funcgraph.
 func loadFuncgraph() (*ebpf.CollectionSpec, error) {

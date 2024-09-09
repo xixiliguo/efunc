@@ -8,15 +8,17 @@
 char __license[] SEC("license") = "Dual MIT/GPL";
 
 #define COMM_LEN 16
-#define PARA_LEN 5
 #define MAX_STACK_DEPTH 32
 #define MAX_KSTACK_DEPTH 128
 #define MAX_FUNC_NAME_LEN 40
-#define MAX_TRACE_FIELD_LEN 20
 
-#define MAX_TRACES 5
-#define MAX_TRACE_DATA 1024
-#define MAX_TRACE_BUF (MAX_TRACES * MAX_TRACE_DATA)
+enum trace_constant {
+    PARA_LEN = 16,
+    MAX_TRACE_FIELD_LEN = 5,
+    MAX_TRACES = 7,
+    MAX_TRACE_DATA = 1024,
+    MAX_TRACE_BUF =  5 * MAX_TRACE_DATA,
+};
 
 #define CMP_NOP 0
 #define CMP_EQ 1
@@ -40,6 +42,8 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 #define RET_EVENT_SUCCESS 6
 #define RET_EVENT_DROP 7
 
+#define vlog(fmt, ...) do { if (verbose) { bpf_printk(fmt, ##__VA_ARGS__); }  } while (0)
+
 volatile const bool verbose = false;
 volatile const bool has_bpf_get_func_ip = false;
 volatile const u64 kret_offset = 0;
@@ -53,27 +57,51 @@ volatile const u32 pid_deny_cnt = 0;
 
 volatile const u64 duration_ms = 0;
 
+enum arg_kind {
+    REG,
+    STACK,
+    ADDR,
+    RET_REG,
+    RET_STACK,
+    REG_PTR,
+    STACK_PTR,
+};
+
+enum arg_addr {
+    BASE_LEN = 4,
+    BASE_SHIFT = 28,
+    INDEX_LEN = 4,
+    INDEX_SHIFT = 24,
+    SCALE_LEN = 8,
+    SCALE_SHIFT = 16,
+    IMM_LEN = 16,
+    IMM_SHIFT = 0,
+};
+
+enum trace_data_flags {
+    DATA_STR = 1,
+    DATA_DEREF = 2,
+    DATA_SIGN = 4,
+};
+
+#define read_bits(v, len, shift) ((v >> shift) & ((1 << len) - 1))
+
 struct trace_data {
-    bool base_addr;
-    u8 para;
-    u8 base;
-    u8 index;
-    s16 scale;
-    s16 imm;
-    bool is_str;
+    enum arg_kind arg_kind;
+    u32 arg_loc;
     u8 field_cnt;
-    u32 offsets[MAX_TRACE_FIELD_LEN];
+    u16 offsets[MAX_TRACE_FIELD_LEN];
     u16 size;
-    bool is_sign;
+    u8 bit_off;
+    u8 bit_size;
+    u8 flags;
     u8 cmp_operator;
     u64 target;
-    u32 bitOff;
-    u32 bitSize;
 };
 struct func {
     u32 id;
     bool is_main_entry;
-    u8 name[MAX_FUNC_NAME_LEN];
+    char name[MAX_FUNC_NAME_LEN];
     u8 trace_cnt;
     struct trace_data trace[MAX_TRACES];
     u8 ret_trace_cnt;
@@ -85,21 +113,13 @@ struct start_event {
     u64 task;
 };
 
-struct func_entry_event {
-    u8 type;
-    u64 task;
-    u32 cpu_id;
-    u64 depth;
-    u64 seq_id;
-    u64 ip;
-    u32 id;
-    u64 time;
-    u64 para[PARA_LEN];
-    bool have_data;
-    u8 buf[0];
+struct event_data {
+    u16 data_len;
+    s16 data_off[MAX_TRACES];
+    u8 data[0];
 };
 
-struct func_ret_event {
+struct func_event {
     u8 type;
     u64 task;
     u32 cpu_id;
@@ -107,12 +127,27 @@ struct func_ret_event {
     u64 seq_id;
     u64 ip;
     u32 id;
-    u64 time;
-    u64 duration;
-    u64 ret;
     bool have_data;
-    u8 buf[0];
+    // u64 time;
+    u64 duration;
+    u64 records[PARA_LEN];
+    struct event_data buf[0];
 };
+
+// struct func_ret_event {
+//     u8 type;
+//     u64 task;
+//     u32 cpu_id;
+//     u64 depth;
+//     u64 seq_id;
+//     u64 ip;
+//     u32 id;
+//     bool have_data;
+//     u64 time;
+//     u64 duration;
+//     u64 ret[PARA_LEN];
+//     struct event_data buf[0];
+// };
 
 struct call_event {
     u8 type;
@@ -180,10 +215,15 @@ struct {
 
 static const struct call_event empty_call_event;
 
+const enum arg_kind *arg_type_unused __attribute__((unused));
+const enum arg_addr *arg_addr_unused __attribute__((unused));
+const enum trace_constant *trace_constant_unused __attribute__((unused));
+const enum trace_data_flags *trace_data_flags_unused __attribute__((unused));
 const struct trace_data *trace_unused __attribute__((unused));
 const struct start_event *start_unused __attribute__((unused));
-const struct func_entry_event *entry_unused __attribute__((unused));
-const struct func_ret_event *ret_unused __attribute__((unused));
+const struct event_data *event_data_unused __attribute__((unused));
+const struct func_event *entry_unused __attribute__((unused));
+// const struct func_ret_event *ret_unused __attribute__((unused));
 
 static __always_inline u64 get_kprobe_func_ip(struct pt_regs *ctx) {
     u64 ip = 0;
@@ -268,112 +308,268 @@ static __always_inline void update_event_stat(u64 event_type) {
     return;
 }
 
-static __always_inline void print_event(struct call_event *e, char *when) {
-    bpf_printk("============= %s: EVENT DETAIL =============", when);
-    bpf_printk("============= addr: %llx", e);
-    bpf_printk("============= pid: %d tid: %d", e->pid, e->tid);
-    bpf_printk("============= start_time: %lld end_time: %lld", e->start_time,
-               e->end_time);
-    bpf_printk("============= depth: %d", e->depth);
-    for (int i = 0; i < 5; i++) {
-        bpf_printk("============= ips[%d]: %llx", i, e->ips[i]);
+static __always_inline void print_call_event(struct call_event *e, char *when) {
+    bpf_printk("============= CALL EVENT DETAIL =============");
+    bpf_printk("when: %s", when);
+    bpf_printk("addr: 0x%px task_struct: 0x%px", e, e->task);
+    bpf_printk("pid: %d tid: %d comm: %s", e->pid, e->tid, e->comm);
+    bpf_printk("start_time: %lld end_time: %lld", e->start_time, e->end_time);
+    bpf_printk("depth: %llu next_seq_id: %llu", e->depth, e->next_seq_id);
+    for (int i = 0; i <= e->depth && i < MAX_STACK_DEPTH; i++) {
+        bpf_printk("ips[%d]: %pS", i, e->ips[i]);
+    }
+    for (int i = 0; i <= e->depth && i < MAX_STACK_DEPTH; i++) {
+        bpf_printk("durations[%d]: %llu", i, e->durations[i]);
     }
     return;
 }
 
+static __always_inline void print_entry_event(struct func_event *e) {
+    bpf_printk("============= ENTRY EVENT DETAIL =============");
+    bpf_printk("addr: 0x%px task_struct: 0x%px", e, e->task);
+    bpf_printk("depth: %llu seq_id: %llu", e->depth, e->seq_id);
+    bpf_printk("ip: %pS func_id: %u", e->ip, e->id);
+    return;
+}
 
+#ifdef __TARGET_ARCH_x86
+static __always_inline u64 get_arg_reg_value(struct pt_regs *ctx, u32 arg_idx) {
+    u64 data;
+    switch (arg_idx) {
+        case 0:
+            data = PT_REGS_PARM1(ctx);
+            barrier_var(ctx);
+            break;
+        case 1:
+            data = PT_REGS_PARM2(ctx);
+            barrier_var(ctx);
+            break;
+        case 2:
+            data = PT_REGS_PARM3(ctx);
+            barrier_var(ctx);
+            break;
+        case 3:
+            data = PT_REGS_PARM4(ctx);
+            barrier_var(ctx);
+            break;
+        case 4:
+            data = PT_REGS_PARM5(ctx);
+            barrier_var(ctx);
+            break;
+        case 5:
+            data = PT_REGS_PARM6(ctx);
+            barrier_var(ctx);
+            break;
+        default:
+            data = 0;
+            break;
+    }
+    return data;
+}
+#else /* !__TARGET_ARCH_x86 */
+static __always_inline u64 get_arg_reg_value(struct pt_regs *ctx, u32 arg_idx) {
+    u64 data;
+    switch (arg_idx) {
+        case 0:
+            data = PT_REGS_PARM1(ctx);
+            barrier_var(ctx);
+            break;
+        case 1:
+            data = PT_REGS_PARM2(ctx);
+            barrier_var(ctx);
+            break;
+        case 2:
+            data = PT_REGS_PARM3(ctx);
+            barrier_var(ctx);
+            break;
+        case 3:
+            data = PT_REGS_PARM4(ctx);
+            barrier_var(ctx);
+            break;
+        case 4:
+            data = PT_REGS_PARM5(ctx);
+            barrier_var(ctx);
+            break;
+        case 5:
+            data = PT_REGS_PARM6(ctx);
+            barrier_var(ctx);
+            break;
+        case 6:
+            data = PT_REGS_PARM7(ctx);
+            barrier_var(ctx);
+            break;
+        case 7:
+            data = PT_REGS_PARM8(ctx);
+            barrier_var(ctx);
+            break;
+        default:
+            data = 0;
+            break;
+    }
+    return data;
+}
+#endif
 
-static __always_inline void extract_data(u8 cnt, bool is_ret, u8 *buf,
-                                               struct func *fn, u64 *para, u64 ret) {
-    for (int i = 0; i < cnt && i < MAX_TRACES; i++) {
-        u16 off = i * MAX_TRACE_DATA;
-        struct trace_data t = fn->trace[i];
+static __always_inline u64 get_stack_pointer(struct pt_regs *ctx)
+{
+	return PT_REGS_SP(ctx);
+}
+
+static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struct func *fn, struct event_data *buf) {
+
+    buf->data_len = 0;
+    for (int i = 0; i < MAX_TRACES; i++) {
+        u16 off;
+        void *dst;
+        struct trace_data *t = &fn->trace[i];
         if (is_ret) {
-            t = fn->ret_trace[i];
+            t = &fn->ret_trace[i];
         }
-        if (t.size == 0) {
+        if (t->size == 0) {
+            break;
+        }
+        if (buf->data_len >= MAX_TRACE_BUF) {
+            buf->data_off[i] = -1;
+            continue;
+        }
+
+        dst = buf->data + buf->data_len;
+        u16 sz = t->size;
+        u32 reg_idx, stack_off;
+        u8 base, index;
+        s8 scale;
+        s16 imm;
+        
+        if (sz == 0) {
             break;
         }
 
-        u64 data = 0;
-        u64 prev_data = (u64)&data;
+        
+        u64 vals[2];
+        u64 data_ptr = (u64)vals;
 
-        if (para != NULL) {
-            if (t.para < PARA_LEN) {
-                data = para[t.para];
-            } else {
-                continue;;
-            }
-        } else {
-            data = ret;
-        }
+        u32 idx_off = t->arg_loc;
 
-        if (t.base_addr) {
-            if (t.base < i) {
+        switch (t->arg_kind) {
+            case REG:
+                vals[0]= get_arg_reg_value(ctx, idx_off);
+                vals[1]= get_arg_reg_value(ctx, idx_off + 1);
+                data_ptr = (u64)vals;
+                break;
+            case STACK:
+                vals[0] = get_stack_pointer(ctx) + idx_off * 8;
+                data_ptr = vals[0];
+                break;
+            case ADDR:
+                //4 + 4 + 8 + 16
+                base = (u8)(read_bits(idx_off, BASE_LEN, BASE_SHIFT));
+                index = (u8)(read_bits(idx_off, INDEX_LEN, INDEX_SHIFT));
+                scale = (s8)(read_bits(idx_off, SCALE_LEN, SCALE_SHIFT));
+                imm = (s16)(read_bits(idx_off, IMM_LEN, IMM_SHIFT));
+                
                 s64 addr =0;
-                u16 b = t.base * MAX_TRACE_DATA;
-                bpf_probe_read_kernel(&addr, 8, &buf[b]);
-                if (t.scale != 0 && t.index < i) {
-                    u16 bi = t.index * MAX_TRACE_DATA;
-                    s64 i = 0;
-                    u16 sz = fn->trace[t.index].size;
-                    if (is_ret) {
-                        sz = fn->ret_trace[t.index].size;
-                    }
-                    if (sz > 8) {
+                bpf_probe_read_kernel(&addr, 8,  &buf->data[buf->data_off[base]]);
+                if (scale != 0 && index < i) {
+                    s64 index_data = 0;
+                    barrier_var(index);
+                    if (index >= MAX_TRACES) {
                         continue;
                     }
-                    bpf_probe_read_kernel(&i, sz, &buf[bi]);
-                    addr += i * t.scale;
+                    u16 index_sz = fn->trace[index].size;
+                    if (is_ret) {
+                        index_sz = fn->ret_trace[index].size;
+                    }
+                    if (index_sz > 8) {
+                        continue;
+                    }
+                    bpf_probe_read_kernel(&index_data, index_sz, &buf->data[buf->data_off[index]]);
+                    addr += index_data * scale;
                 }
-                if (t.imm != 0) {
-                    addr += t.imm;
-                }
-                data = (u64)addr;
-            } else {
-                continue;
-            }
+                addr += imm;
+                
+                vals[0] = (u64)addr;
+                data_ptr = (u64)vals;
+                break;
+            case RET_REG:
+                #ifdef __TARGET_ARCH_x86
+                vals[0] = (u64)__PT_REGS_CAST((struct pt_regs *)ctx)->ax;
+                vals[1] = (u64)__PT_REGS_CAST((struct pt_regs *)ctx)->dx;
+                #else /* !__TARGET_ARCH_x86 */
+                vals[0] = (u64)PT_REGS_PARM1((struct pt_regs *)ctx);
+                vals[1] = (u64)PT_REGS_PARM2((struct pt_regs *)ctx);
+                #endif
+                data_ptr = (u64)vals;
+                break;
+            case RET_STACK:
+                #ifdef __TARGET_ARCH_x86
+                vals[0] = (u64)PT_REGS_RC((struct pt_regs *)ctx);
+                #else /* !__TARGET_ARCH_x86 */
+                vals[0] = __PT_REGS_CAST(ctx)->regs[8];
+                #endif
+                data_ptr = vals[0];
+                break;
+            case REG_PTR:
+                data_ptr = get_arg_reg_value(ctx, idx_off);
+                break;
+            case STACK_PTR:
+                data_ptr = get_stack_pointer(ctx) + idx_off * 8;
+                bpf_probe_read_kernel(&data_ptr, sizeof(data_ptr), (void *)data_ptr);
+                break;
         }
 
-        for (u8 idx = 0; idx < t.field_cnt && idx < MAX_TRACE_FIELD_LEN;
-                idx++) {
-            data += t.offsets[idx];
-            prev_data = data;
-            bpf_probe_read_kernel(&data, sizeof(data), (void *)data);
+        for (u8 idx = 0;  idx < t->field_cnt && idx < MAX_TRACE_FIELD_LEN; idx++) {
+            // if (t->offsets[idx] == 0) {
+            //     break;
+            // }
+            bpf_probe_read_kernel(&data_ptr, sizeof(data_ptr), (void *)data_ptr);
+            data_ptr += t->offsets[idx];
         }
 
-        u16 sz = t.size;
         if (sz > MAX_TRACE_DATA) {
             sz = MAX_TRACE_DATA;
         }
-        bpf_probe_read_kernel(&buf[off], sz, (void *)prev_data);
-        if (t.is_str) {
-            bpf_probe_read_kernel_str(&buf[off], MAX_TRACE_DATA,
-                                        (void *)data);
+
+
+        s16 err;
+        if (t->flags & DATA_STR) {
+            bpf_probe_read_kernel(&data_ptr, sizeof(data_ptr),
+                                  (void *)data_ptr);
+            if ((long)data_ptr <= 0) {
+                err  = bpf_probe_read_kernel_str(dst, MAX_TRACE_DATA,
+                                           (void *)data_ptr);
+            } else {
+                err  = bpf_probe_read_user_str(dst, MAX_TRACE_DATA,
+                                           (void *)data_ptr);
+            }
+            sz = err;
+        } else {
+            if (t->flags & DATA_DEREF) {
+                bpf_probe_read_kernel(&data_ptr, sizeof(data_ptr),
+                                      (void *)data_ptr);
+            }
+            if ((long)data_ptr <= 0) {
+                err  = bpf_probe_read_kernel(dst, sz, (void *)data_ptr);
+            } else {
+                err  = bpf_probe_read_user(dst, sz, (void *)data_ptr);
+            }
         }
+
+        if (err < 0) {
+            buf->data_off[i] = err;
+            return;
+        }
+        buf->data_off[i] = buf->data_len;
+        buf->data_len = (buf->data_len + sz + 7) / 8 * 8;
     }
 }
 
-
-
-static __always_inline void extract_trace_data(struct func_entry_event *e,
-                                               struct func *fn) {
-
-    extract_data(fn->trace_cnt, false, e->buf, fn , e->para,0);
-   
-}
-
-
-static __always_inline void extract_ret_trace_data(struct func_ret_event *r,
-                                                   struct func *fn) {
-                                                
-    extract_data(fn->ret_trace_cnt, true, r->buf, fn , NULL, r->ret);
-}
-
 static __always_inline bool trace_have_filter_expr(struct func *fn) {
-    for (int i = 0; i < fn->trace_cnt && i < MAX_TRACES; i++) {
-        struct trace_data t = fn->trace[i];
-        if (t.cmp_operator != CMP_NOP) {
+    for (int i = 0; i < MAX_TRACES; i++) {
+        struct trace_data *t = &fn->trace[i];
+        if (t->size == 0) {
+            break;
+        }
+        if (t->cmp_operator != CMP_NOP) {
             return true;
         }
     }
@@ -381,9 +577,12 @@ static __always_inline bool trace_have_filter_expr(struct func *fn) {
 }
 
 static __always_inline bool ret_trace_have_filter_expr(struct func *fn) {
-    for (int i = 0; i < fn->ret_trace_cnt && i < MAX_TRACES; i++) {
-        struct trace_data t = fn->ret_trace[i];
-        if (t.cmp_operator != CMP_NOP) {
+    for (int i = 0; i < MAX_TRACES; i++) {
+        struct trace_data *t = &fn->ret_trace[i];
+        if (t->size == 0) {
+            break;
+        }
+        if (t->cmp_operator != CMP_NOP) {
             return true;
         }
     }
@@ -403,12 +602,11 @@ static __always_inline int __strncmp(const void *m1, const void *m2, size_t len)
         return delta;
 }
 
-static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn,
+static __always_inline bool trace_data_allowed(struct event_data *buf, struct func *fn,
                                                bool ret) {
-    u8 trace_cnt = fn->trace_cnt;
+
     struct trace_data *tp = fn->trace;
     if (ret) {
-        trace_cnt = fn->ret_trace_cnt;
         tp = fn->ret_trace;
     }
 
@@ -416,44 +614,61 @@ static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn,
     u8 cmp_cnt = 0;
     u8 cmp_cnt_allowed = 0;
 
-    for (int i = 0; i < trace_cnt && i < MAX_TRACES; i++) {
+    for (int i = 0; i < MAX_TRACES; i++) {
         u64 src_unsign_data = 0;
         s64 src_sign_data = 0;
         struct trace_data *t = tp + i;
+        if (t->size == 0) {
+            break;
+        }
+        u16 sz = t->size;
+
+        u32 bit_off, bit_size;
+        bit_off = t->bit_off;
+        bit_size = t->bit_size;
+
+        bool is_str = t->flags & DATA_STR;
+        bool is_sign = t->flags & DATA_SIGN;
 
         if (t->cmp_operator == CMP_NOP) {
             continue;
         }
 
-        u16 off = i * MAX_TRACE_DATA;
+        if (buf->data_off[i] < 0) {
+            continue;
+        }
+        if (buf->data_off[i] >= MAX_TRACE_BUF) {
+            continue;
+        }
+        void *dst = buf->data + buf->data_off[i];
 
-        if (t->size == 1) {
-            src_unsign_data = *(u8 *)&buf[off];
-            src_sign_data = *(s8 *)&buf[off];
+        if (sz == 1) {
+            src_unsign_data = *(u8 *)dst;
+            src_sign_data = *(s8 *)dst;
         }
-        if (t->size == 2) {
-            src_unsign_data = *(u16 *)&buf[off];
-            src_sign_data = *(s16 *)&buf[off];
+        if (sz == 2) {
+            src_unsign_data = *(u16 *)dst;
+            src_sign_data = *(s16 *)dst;
         }
-        if (t->size == 4) {
-            src_unsign_data = *(u32 *)&buf[off];
-            src_sign_data = *(s32 *)&buf[off];
+        if (sz == 4) {
+            src_unsign_data = *(u32 *)dst;
+            src_sign_data = *(s32 *)dst;
         }
-        if (t->size == 8) {
-            src_unsign_data = *(u64 *)&buf[off];
-            src_sign_data = *(s64 *)&buf[off];
+        if (sz == 8) {
+            src_unsign_data = *(u64 *)dst;
+            src_sign_data = *(s64 *)dst;
         }
 
-        if (t->bitSize != 0) {
-            u32 left = 64 - t->bitOff - t->bitSize;
-            u32 right = 64 - t->bitSize;
+        if (bit_size) {
+            u32 left = 64 - bit_off - bit_size;
+            u32 right = 64 - bit_size;
             src_unsign_data = (src_unsign_data << (u64)left) >> (u64)right;
         }
 
         cmp_cnt++;
 
-        if (t->is_str) {
-            int re = __strncmp(&buf[off], &t->target, 8);
+        if (is_str) {
+            int re = __strncmp(dst, &t->target, 8);
             if (t->cmp_operator == CMP_EQ && re == 0) {
                 cmp_cnt_allowed++;
             }
@@ -463,38 +678,38 @@ static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn,
         } else {
             switch (t->cmp_operator) {
                 case CMP_EQ:
-                    if ((!t->is_sign && src_unsign_data == t->target) ||
-                        (t->is_sign && src_sign_data == (s64)t->target)) {
+                    if ((!is_sign && src_unsign_data == t->target) ||
+                        (is_sign && src_sign_data == (s64)t->target)) {
                         cmp_cnt_allowed++;
                     }
                     break;
                 case CMP_NOTEQ:
-                    if ((!t->is_sign && src_unsign_data != t->target) ||
-                        (t->is_sign && src_sign_data != (s64)t->target)) {
+                    if ((!is_sign && src_unsign_data != t->target) ||
+                        (is_sign && src_sign_data != (s64)t->target)) {
                         cmp_cnt_allowed++;
                     }
                     break;
                 case CMP_GT:
-                    if ((!t->is_sign && src_unsign_data > t->target) ||
-                        (t->is_sign && src_sign_data > (s64)t->target)) {
+                    if ((!is_sign && src_unsign_data > t->target) ||
+                        (is_sign && src_sign_data > (s64)t->target)) {
                         cmp_cnt_allowed++;
                     }
                     break;
                 case CMP_GE:
-                    if ((!t->is_sign && src_unsign_data >= t->target) ||
-                        (t->is_sign && src_sign_data >= (s64)t->target)) {
+                    if ((!is_sign && src_unsign_data >= t->target) ||
+                        (is_sign && src_sign_data >= (s64)t->target)) {
                         cmp_cnt_allowed++;
                     }
                     break;
                 case CMP_LT:
-                    if ((!t->is_sign && src_unsign_data < t->target) ||
-                        (t->is_sign && src_sign_data < (s64)t->target)) {
+                    if ((!is_sign && src_unsign_data < t->target) ||
+                        (is_sign && src_sign_data < (s64)t->target)) {
                         cmp_cnt_allowed++;
                     }
                     break;
                 case CMP_LE:
-                    if ((!t->is_sign && src_unsign_data <= t->target) ||
-                        (t->is_sign && src_sign_data <= (s64)t->target)) {
+                    if ((!is_sign && src_unsign_data <= t->target) ||
+                        (is_sign && src_sign_data <= (s64)t->target)) {
                         cmp_cnt_allowed++;
                     }
                     break;
@@ -505,20 +720,40 @@ static __always_inline bool trace_data_allowed(u8 *buf, struct func *fn,
     return cmp_cnt == cmp_cnt_allowed;
 }
 
-static __always_inline void extract_func_paras(struct func_entry_event *e,
+static __always_inline void extract_func_paras(struct func_event *e,
                                                struct pt_regs *ctx) {
-    e->para[0] = PT_REGS_PARM1(ctx);
-    e->para[1] = PT_REGS_PARM2(ctx);
-    e->para[2] = PT_REGS_PARM3(ctx);
-    e->para[3] = PT_REGS_PARM4(ctx);
-    e->para[4] = PT_REGS_PARM5(ctx);
+    e->records[0] = PT_REGS_PARM1(ctx);
+    e->records[1] = PT_REGS_PARM2(ctx);
+    e->records[2] = PT_REGS_PARM3(ctx);
+    e->records[3] = PT_REGS_PARM4(ctx);
+    e->records[4] = PT_REGS_PARM5(ctx);
+    e->records[5] = PT_REGS_PARM6(ctx);
+#ifdef __TARGET_ARCH_arm64
+    e->records[6] = PT_REGS_PARM7(ctx);
+    e->records[7] = PT_REGS_PARM8(ctx);
+#endif
+    u64 sp = PT_REGS_SP(ctx);
+    bpf_probe_read_kernel(&e->records[8], 8 * 8, (void *)sp);
+}
+
+static __always_inline void extract_func_ret(struct func_event *r,
+                                             struct pt_regs *ctx) {
+#ifdef __TARGET_ARCH_x86
+    r->records[0] = (u64)__PT_REGS_CAST(ctx)->ax;
+    r->records[1] = (u64)__PT_REGS_CAST(ctx)->dx;
+    bpf_probe_read_kernel(&r->records[8], 8 * 8, (void *)r->records[0]);
+#else /* !__TARGET_ARCH_x86 */
+    r->records[0] = (u64)PT_REGS_PARM1((struct pt_regs *)ctx);
+    r->records[1] = (u64)PT_REGS_PARM2((struct pt_regs *)ctx);
+    bpf_probe_read_kernel(&r->records[8], 8 * 8, (void *)__PT_REGS_CAST(ctx)->regs[8]);
+#endif
 }
 
 static __always_inline int handle_entry(struct pt_regs *ctx) {
     u64 ip = get_kprobe_func_ip(ctx);
     struct func *fn = bpf_map_lookup_elem(&func_info, &ip);
     if (!fn) {
-        bpf_printk("no func info for kprobe addr %llx", ip);
+        bpf_printk("no func info for kprobe addr 0x%px", ip);
         return 0;
     }
 
@@ -532,18 +767,14 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
     e = bpf_map_lookup_elem(&call_events, &task);
     if (!e) {
         if (fn->is_main_entry == false) {
-            if (verbose) {
-                bpf_printk(
-                    "func %s will not be traced when first time creating event",
-                    (char *)&fn->name);
-            }
+            vlog("non-main-entry func %s will not be traced when first time creating event", fn->name);
             return 0;
         }
 
         if (trace_have_filter_expr(fn)) {
-            struct func_entry_event *entry_info;
+            struct func_event *entry_info;
             entry_info = bpf_ringbuf_reserve(
-                &events, sizeof(struct func_entry_event) + MAX_TRACE_BUF, 0);
+                &events, sizeof(struct func_event) + sizeof(struct event_data) + MAX_TRACE_BUF + MAX_TRACE_DATA, 0);
             if (!entry_info) {
             } else {
                 entry_info->type = ENTRY_EVENT;
@@ -553,16 +784,12 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
                 entry_info->seq_id = 0;
                 entry_info->ip = ip;
                 entry_info->id = fn->id;
-                entry_info->time = bpf_ktime_get_ns();
+                // entry_info->time = bpf_ktime_get_ns();
                 extract_func_paras(entry_info, ctx);
                 entry_info->have_data = true;
-                extract_trace_data(entry_info, fn);
-                if (trace_data_allowed(entry_info->buf, fn, false) == false) {
-                    if (verbose) {
-                        bpf_printk(
-                            "func %s will not be traced since it was filtered",
-                            (char *)&fn->name);
-                    }
+                extract_data(ctx, false, fn, entry_info->buf);
+                if (trace_data_allowed(&entry_info->buf[0], fn, false) == false) {
+                    vlog("func %s will not be traced since it was filtered", fn->name);
                     bpf_ringbuf_discard(entry_info, 0);
                     return 0;
                 }
@@ -583,11 +810,8 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
         struct task_struct *tsk = (struct task_struct *)task;
         BPF_CORE_READ_INTO(&e->group_comm, tsk, group_leader, comm);
         e->start_time = bpf_ktime_get_ns();
-        e->next_seq_id = 1;
-        if (verbose) {
-            bpf_printk("create event %llx depth %d entry func %s", e, e->depth,
-                       (char *)&fn->name);
-        }
+        e->next_seq_id = 0;
+        vlog("create event 0x%px depth %d entry func %s", e, e->depth, fn->name);
         struct start_event *start_info;
         start_info =
             bpf_ringbuf_reserve(&events, sizeof(struct start_event), 0);
@@ -606,29 +830,24 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
     u64 d = e->depth;
     barrier_var(d);
     if (d >= max_depth || d >= MAX_STACK_DEPTH) {
-        if (verbose) {
-            bpf_printk("funcentry event %llx depth %d exceed %d", e, e->depth,
-                       MAX_STACK_DEPTH);
-        }
+        vlog("funcentry event %px depth %d exceed %d", e, e->depth, MAX_STACK_DEPTH);
         e->depth = d + 1;
         return 0;
     }
 
     if (d == 0 && fn->is_main_entry == false) {
-        bpf_printk(
-            "func %s which will be record at depth %d is not entry function",
-            (char *)&fn->name, d);
+        vlog("func %s at depth 0 is not entry function",fn->name);
         if (verbose) {
-            print_event(e, "ABNORMAL");
+            print_call_event(e, "NON-MAIN-ENTRY-FUNC");
         }
         bpf_map_delete_elem(&call_events, &task);
         return 0;
     }
 
     if (fn->trace_cnt == 0) {
-        struct func_entry_event *entry_info;
+        struct func_event *entry_info;
         entry_info =
-            bpf_ringbuf_reserve(&events, sizeof(struct func_entry_event), 0);
+            bpf_ringbuf_reserve(&events, sizeof(struct func_event), 0);
         if (!entry_info) {
             update_event_stat(ENTRY_EVENT_DROP);
         } else {
@@ -640,14 +859,18 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
             entry_info->seq_id = e->next_seq_id;
             entry_info->ip = ip;
             entry_info->id = fn->id;
-            entry_info->time = bpf_ktime_get_ns();
+            // entry_info->time = bpf_ktime_get_ns();
             extract_func_paras(entry_info, ctx);
+            entry_info->have_data = false;
+            if (verbose) {
+                print_entry_event(entry_info);
+            }
             bpf_ringbuf_submit(entry_info, 0);
         }
     } else {
-        struct func_entry_event *entry_info;
+        struct func_event *entry_info;
         entry_info = bpf_ringbuf_reserve(
-            &events, sizeof(struct func_entry_event) + MAX_TRACE_BUF, 0);
+            &events, sizeof(struct func_event) + sizeof(struct event_data) + MAX_TRACE_BUF + MAX_TRACE_DATA, 0);
         if (!entry_info) {
             update_event_stat(ENTRY_EVENT_DROP);
         } else {
@@ -659,10 +882,13 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
             entry_info->seq_id = e->next_seq_id;
             entry_info->ip = ip;
             entry_info->id = fn->id;
-            entry_info->time = bpf_ktime_get_ns();
+            // entry_info->time = bpf_ktime_get_ns();
             extract_func_paras(entry_info, ctx);
             entry_info->have_data = true;
-            extract_trace_data(entry_info, fn);
+            extract_data(ctx, false, fn, entry_info->buf);
+            if (verbose) {
+                print_entry_event(entry_info);
+            }
             bpf_ringbuf_submit(entry_info, 0);
         }
     }
@@ -672,7 +898,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
     e->durations[d] = bpf_ktime_get_ns();
     e->depth = d + 1;
     if (verbose) {
-        print_event(e, "FUNCENTRY");
+        print_call_event(e, "FUNCENTRY");
     }
 
     return 0;
@@ -714,34 +940,28 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
     u64 task = bpf_get_current_task();
     e = bpf_map_lookup_elem(&call_events, &task);
     if (!e) {
-        if (verbose) {
-            bpf_printk("no event when kretprobe func %s", (char *)&fn->name);
-        }
+        vlog("no call event when kretprobe func %s", fn->name);
         return 0;
     }
 
     u64 d = e->depth;
     if (d == 0) {
-        bpf_printk("shoud not depth 0 during kretprobe func %s", task,
-                   (char *)&fn->name);
+        vlog("shoud not depth 0 during kretprobe func %s", task, fn->name);
         return 0;
     }
     d -= 1;
     barrier_var(d);
     if (d >= max_depth || d >= MAX_STACK_DEPTH) {
-        if (verbose) {
-            bpf_printk("funcret depth %d exceed %d", d, MAX_STACK_DEPTH);
-        }
+        vlog("funcret depth %d exceed %d", d, MAX_STACK_DEPTH);
         e->depth = d;
         return 0;
     }
 
     u64 prev = e->ips[d];
     if (prev != ip) {
+        vlog("kprobe ip %llx is not enqual to kretprobe ip %llx", prev, ip);
         if (verbose) {
-            bpf_printk("kprobe ip %llx is not enqual to kretprobe ip %llx",
-                       prev, ip);
-            print_event(e, "ABNORMAL");
+            print_call_event(e, "RET ABNORMAL");
         }
         bpf_map_delete_elem(&call_events, &task);
         return 0;
@@ -750,9 +970,9 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
     bool skip = false;
 
     if (fn->ret_trace_cnt == 0) {
-        struct func_ret_event *ret_info;
+        struct func_event *ret_info;
         ret_info =
-            bpf_ringbuf_reserve(&events, sizeof(struct func_ret_event), 0);
+            bpf_ringbuf_reserve(&events, sizeof(struct func_event), 0);
         if (!ret_info) {
             update_event_stat(RET_EVENT_DROP);
         } else {
@@ -764,15 +984,17 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
             ret_info->seq_id = e->next_seq_id;
             ret_info->ip = ip;
             ret_info->id = fn->id;
-            ret_info->time = bpf_ktime_get_ns();
-            ret_info->duration = ret_info->time - e->durations[d];
-            ret_info->ret = PT_REGS_RC(ctx);
+            // ret_info->time = bpf_ktime_get_ns();
+            ret_info->duration = bpf_ktime_get_ns() - e->durations[d];
+            extract_func_ret(ret_info,ctx);
+            ret_info->have_data = false;
+            // ret_info->ret = PT_REGS_RC(ctx);
             bpf_ringbuf_submit(ret_info, 0);
         }
     } else {
-        struct func_ret_event *ret_info;
+        struct func_event *ret_info;
         ret_info = bpf_ringbuf_reserve(
-            &events, sizeof(struct func_ret_event) + MAX_TRACE_BUF, 0);
+            &events, sizeof(struct func_event) + sizeof(struct event_data) + MAX_TRACE_BUF + MAX_TRACE_DATA, 0);
         if (!ret_info) {
             update_event_stat(RET_EVENT_DROP);
         } else {
@@ -784,12 +1006,12 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
             ret_info->seq_id = e->next_seq_id;
             ret_info->ip = ip;
             ret_info->id = fn->id;
-            ret_info->time = bpf_ktime_get_ns();
-            ret_info->duration = ret_info->time - e->durations[d];
-            ret_info->ret = PT_REGS_RC(ctx);
+            // ret_info->time = bpf_ktime_get_ns();
+            ret_info->duration = bpf_ktime_get_ns() - e->durations[d];
+            extract_func_ret(ret_info,ctx);
             ret_info->have_data = true;
-            extract_ret_trace_data(ret_info, fn);
-            if (d == 0 && ret_trace_have_filter_expr(fn) && trace_data_allowed(ret_info->buf,fn,true) == false) {
+            extract_data(ctx, true, fn, ret_info->buf);
+            if (d == 0 && ret_trace_have_filter_expr(fn) && trace_data_allowed(&ret_info->buf[0],fn,true) == false) {
                 skip = true;
             }
             bpf_ringbuf_submit(ret_info, 0);
@@ -814,9 +1036,6 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
         if (!call_info) {
             update_event_stat(CALL_EVENT_DROP);
             bpf_map_delete_elem(&call_events, &task);
-            if (verbose) {
-                print_event(e, "NO-SEND RINGBUF");
-            }
             return 0;
         }
         update_event_stat(CALL_EVENT_SUCCESS);
@@ -825,14 +1044,14 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
                                              sizeof(call_info->kstack), 0);
         bpf_ringbuf_submit(call_info, 0);
         bpf_map_delete_elem(&call_events, &task);
+        vlog("send event %llx and delete it", e);
         if (verbose) {
-            bpf_printk("send event %llx and delete it", e);
-            print_event(e, "SEND RINGBUF");
+            print_call_event(e, "SEND RINGBUF");
         }
         return 0;
     }
     if (verbose) {
-        print_event(e, "FUNCRET");
+        print_call_event(e, "FUNCRET");
     }
     return 0;
 }

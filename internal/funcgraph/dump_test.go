@@ -23,7 +23,7 @@ func BenchmarkDumpDataByBTF(b *testing.B) {
 	if err != nil {
 		b.Fatalf("%s", err)
 	}
-	opt.Reset(rawData, false, 0)
+	opt.Reset(rawData, false, 0, false)
 
 	spec, err := btf.LoadKernelSpec()
 	if err != nil {
@@ -44,7 +44,7 @@ func BenchmarkDumpDataByBTF(b *testing.B) {
 	b.ResetTimer()
 
 	for n := 0; n < b.N; n++ {
-		opt.Reset(rawData, false, 0)
+		opt.Reset(rawData, false, 0, false)
 		opt.dumpDataByBTF(name, typ, 0, 0, 0)
 	}
 }

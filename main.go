@@ -52,8 +52,13 @@ ENVIRONMENT:
 					if btfData, ok := typ.(*btf.Func); ok {
 						s := funcgraph.ShowBtfFunc(btfData)
 						fmt.Printf("%s\n\n", s)
+						fn := &funcgraph.FuncInfo{
+							IsEntry: true,
+							Btfinfo: btfData,
+						}
+						fn.InitArgsRet()
 						for _, data := range expr.Datas {
-							funcgraph.GenTraceData(data, btfData)
+							fn.GenTraceData(data)
 						}
 					} else {
 						return fmt.Errorf("expect function but got %+v", typ)
