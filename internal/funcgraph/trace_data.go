@@ -10,6 +10,8 @@ const (
 	ADDR      ArgType = funcgraphArgTypeADDR
 	RET_REG   ArgType = funcgraphArgTypeRET_REG
 	RET_STACK ArgType = funcgraphArgTypeRET_STACK
+	REG_PTR   ArgType = funcgraphArgTypeREG_PTR
+	STACK_PTR ArgType = funcgraphArgTypeSTACK_PTR
 )
 
 type TraceData struct {

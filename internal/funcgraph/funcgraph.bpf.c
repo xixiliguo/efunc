@@ -15,7 +15,7 @@ char __license[] SEC("license") = "Dual MIT/GPL";
 enum trace_constant {
     PARA_LEN = 16,
     MAX_TRACE_FIELD_LEN = 5,
-    MAX_TRACES = 9,
+    MAX_TRACES = 7,
     MAX_TRACE_DATA = 1024,
     MAX_TRACE_BUF =  5 * MAX_TRACE_DATA,
 };
@@ -63,6 +63,8 @@ enum arg_type {
     ADDR,
     RET_REG,
     RET_STACK,
+    REG_PTR,
+    STACK_PTR,
 };
 
 enum arg_addr {
@@ -142,7 +144,7 @@ struct func_ret_event {
     bool have_data;
     u64 time;
     u64 duration;
-    u64 ret[2];
+    u64 ret[PARA_LEN];
     struct event_data buf[0];
 };
 
@@ -330,38 +332,81 @@ static __always_inline void print_entry_event(struct func_entry_event *e) {
 }
 
 #ifdef __TARGET_ARCH_x86
-static __always_inline u64 get_arg_reg_value(struct pt_regs *ctx, u32 arg_idx)
-{
-
-		switch (arg_idx) {
-			case 0: return PT_REGS_PARM1(ctx);
-			case 1: return PT_REGS_PARM2(ctx);
-			case 2: return PT_REGS_PARM3(ctx);
-			case 3: return PT_REGS_PARM4(ctx);
-			case 4: return PT_REGS_PARM5(ctx);
-			case 5: return PT_REGS_PARM6(ctx);
-			default: return 0;
-		}
-	return 0;
+static __always_inline u64 get_arg_reg_value(struct pt_regs *ctx, u32 arg_idx) {
+    u64 data;
+    switch (arg_idx) {
+        case 0:
+            data = PT_REGS_PARM1(ctx);
+            barrier_var(ctx);
+            break;
+        case 1:
+            data = PT_REGS_PARM2(ctx);
+            barrier_var(ctx);
+            break;
+        case 2:
+            data = PT_REGS_PARM3(ctx);
+            barrier_var(ctx);
+            break;
+        case 3:
+            data = PT_REGS_PARM4(ctx);
+            barrier_var(ctx);
+            break;
+        case 4:
+            data = PT_REGS_PARM5(ctx);
+            barrier_var(ctx);
+            break;
+        case 5:
+            data = PT_REGS_PARM6(ctx);
+            barrier_var(ctx);
+            break;
+        default:
+            data = 0;
+            break;
+    }
+    return data;
 }
 #else /* !__TARGET_ARCH_x86 */
-static __always_inline u64 get_arg_reg_value(struct pt_regs *ctx, u32 arg_idx)
-{
-
-		switch (arg_idx) {
-			case 0: return PT_REGS_PARM1(ctx);
-			case 1: return PT_REGS_PARM2(ctx);
-			case 2: return PT_REGS_PARM3(ctx);
-			case 3: return PT_REGS_PARM4(ctx);
-			case 4: return PT_REGS_PARM5(ctx);
-			case 5: return PT_REGS_PARM6(ctx);
-            case 6: return PT_REGS_PARM7(ctx);
-            case 7: return PT_REGS_PARM8(ctx);
-			default: return 0;
-		}
-	return 0;
+static __always_inline u64 get_arg_reg_value(struct pt_regs *ctx, u32 arg_idx) {
+    u64 data;
+    switch (arg_idx) {
+        case 0:
+            data = PT_REGS_PARM1(ctx);
+            barrier_var(ctx);
+            break;
+        case 1:
+            data = PT_REGS_PARM2(ctx);
+            barrier_var(ctx);
+            break;
+        case 2:
+            data = PT_REGS_PARM3(ctx);
+            barrier_var(ctx);
+            break;
+        case 3:
+            data = PT_REGS_PARM4(ctx);
+            barrier_var(ctx);
+            break;
+        case 4:
+            data = PT_REGS_PARM5(ctx);
+            barrier_var(ctx);
+            break;
+        case 5:
+            data = PT_REGS_PARM6(ctx);
+            barrier_var(ctx);
+            break;
+        case 6:
+            data = PT_REGS_PARM7(ctx);
+            barrier_var(ctx);
+            break;
+        case 7:
+            data = PT_REGS_PARM8(ctx);
+            barrier_var(ctx);
+            break;
+        default:
+            data = 0;
+            break;
+    }
+    return data;
 }
-
 #endif
 
 static __always_inline u64 get_stack_pointer(struct pt_regs *ctx)
@@ -455,8 +500,19 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
                 data_ptr = (u64)vals;
                 break;
             case RET_STACK:
+                #ifdef __TARGET_ARCH_x86
                 vals[0] = (u64)PT_REGS_RC((struct pt_regs *)ctx);
+                #else /* !__TARGET_ARCH_x86 */
+                vals[0] = __PT_REGS_CAST(ctx)->regs[8];
+                #endif
                 data_ptr = vals[0];
+                break;
+            case REG_PTR:
+                data_ptr = get_arg_reg_value(ctx, idx_off);
+                break;
+            case STACK_PTR:
+                data_ptr = get_stack_pointer(ctx) + idx_off * 8;
+                bpf_probe_read_kernel(&data_ptr, sizeof(data_ptr), (void *)data_ptr);
                 break;
         }
 
@@ -682,11 +738,13 @@ static __always_inline void extract_func_paras(struct func_entry_event *e,
 static __always_inline void extract_func_ret(struct func_ret_event *r,
                                              struct pt_regs *ctx) {
 #ifdef __TARGET_ARCH_x86
-    r->ret[0] = (u64)__PT_REGS_CAST((struct pt_regs *)ctx)->ax;
-    r->ret[1] = (u64)__PT_REGS_CAST((struct pt_regs *)ctx)->dx;
+    r->ret[0] = (u64)__PT_REGS_CAST(ctx)->ax;
+    r->ret[1] = (u64)__PT_REGS_CAST(ctx)->dx;
+    bpf_probe_read_kernel(&r->ret[8], 8 * 8, (void *)r->ret[0]);
 #else /* !__TARGET_ARCH_x86 */
     r->ret[0] = (u64)PT_REGS_PARM1((struct pt_regs *)ctx);
     r->ret[1] = (u64)PT_REGS_PARM2((struct pt_regs *)ctx);
+    bpf_probe_read_kernel(&r->ret[8], 8 * 8, (void *)__PT_REGS_CAST(ctx)->regs[8]);
 #endif
 }
 

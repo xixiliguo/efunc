@@ -34,6 +34,8 @@ const (
 	funcgraphArgTypeADDR      funcgraphArgType = 2
 	funcgraphArgTypeRET_REG   funcgraphArgType = 3
 	funcgraphArgTypeRET_STACK funcgraphArgType = 4
+	funcgraphArgTypeREG_PTR   funcgraphArgType = 5
+	funcgraphArgTypeSTACK_PTR funcgraphArgType = 6
 )
 
 type funcgraphCallEvent struct {
@@ -56,7 +58,7 @@ type funcgraphCallEvent struct {
 
 type funcgraphEventData struct {
 	DataLen uint16
-	DataOff [9]int16
+	DataOff [7]int16
 	Data    [0]uint8
 }
 
@@ -66,10 +68,10 @@ type funcgraphFunc struct {
 	Name        [40]int8
 	TraceCnt    uint8
 	_           [2]byte
-	Trace       [9]funcgraphTraceData
+	Trace       [7]funcgraphTraceData
 	RetTraceCnt uint8
 	_           [7]byte
-	RetTrace    [9]funcgraphTraceData
+	RetTrace    [7]funcgraphTraceData
 }
 
 type funcgraphFuncEntryEvent struct {
@@ -103,7 +105,7 @@ type funcgraphFuncRetEvent struct {
 	_        [3]byte
 	Time     uint64
 	Duration uint64
-	Ret      [2]uint64
+	Ret      [16]uint64
 	Buf      [0]funcgraphEventData
 }
 
@@ -118,7 +120,7 @@ type funcgraphTraceConstant uint32
 const (
 	funcgraphTraceConstantPARA_LEN            funcgraphTraceConstant = 16
 	funcgraphTraceConstantMAX_TRACE_FIELD_LEN funcgraphTraceConstant = 5
-	funcgraphTraceConstantMAX_TRACES          funcgraphTraceConstant = 9
+	funcgraphTraceConstantMAX_TRACES          funcgraphTraceConstant = 7
 	funcgraphTraceConstantMAX_TRACE_DATA      funcgraphTraceConstant = 1024
 	funcgraphTraceConstantMAX_TRACE_BUF       funcgraphTraceConstant = 5120
 )

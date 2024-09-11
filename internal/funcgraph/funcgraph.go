@@ -85,10 +85,10 @@ type FuncEvent struct {
 	Time     uint64
 	Para     [funcgraphTraceConstantPARA_LEN]uint64
 	DataLen  uint16
-	DataOff  [9]int16
+	DataOff  [MaxTraceCount]int16
 	Data     *[MaxTraceDataLen]uint8
 	Duration uint64
-	Ret      [2]uint64
+	Ret      [funcgraphTraceConstantPARA_LEN]uint64
 }
 
 type FuncEvents []FuncEvent
@@ -229,12 +229,10 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 				}
 			}
 			if len(fn.trace) > MaxTraceCount {
-				fn.trace = fn.trace[:MaxTraceCount]
-				fmt.Printf("current traceData exceed max %d limit\n", MaxTraceCount)
+				return nil, false, fmt.Errorf("trace count of %s exceed max %d limit", fn, MaxTraceCount)
 			}
 			if len(fn.retTrace) > MaxTraceCount {
-				fn.retTrace = fn.retTrace[:MaxTraceCount]
-				fmt.Printf("current retTraceData exceed max %d limit\n", MaxTraceCount)
+				return nil, false, fmt.Errorf("ret trace count of %s exceed max %d limit", fn, MaxTraceCount)
 			}
 			return fn, true, nil
 		}
@@ -691,15 +689,16 @@ func (fg *FuncGraph) startCmd(target string, recv, send chan int) {
 }
 
 func (fg *FuncGraph) Run() error {
-	if fg.dryRun {
-		fmt.Printf("will not run when run dry run mode\n")
-		return nil
-	}
+
 	start := time.Now()
 	if err := fg.load(); err != nil {
 		return err
 	}
 	fmt.Printf("load ebpf and update maps take %s\n", time.Since(start))
+	if fg.dryRun {
+		fmt.Printf("will not run when run dry run mode\n")
+		return nil
+	}
 
 	if fg.mode != "kprobe" && fg.haveKprobeMulti {
 		addrs := []uintptr{}

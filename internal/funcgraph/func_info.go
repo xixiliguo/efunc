@@ -3,7 +3,6 @@ package funcgraph
 import (
 	"bytes"
 	"fmt"
-	"runtime"
 	"strings"
 	"unsafe"
 
@@ -18,6 +17,7 @@ const (
 )
 
 type Arg struct {
+	Name   string
 	Type   ArgType
 	IdxOff uint32
 	Size   int
@@ -34,68 +34,12 @@ type FuncInfo struct {
 	retTrace []*TraceData
 }
 
-func idxInReg(idx int) bool {
-	if runtime.GOARCH == "amd64" {
-		return idx < 6
-	}
-	return idx < 8
-}
-
-func (f *FuncInfo) InitArgsRet() {
-
-	proto := f.Btfinfo.Type.(*btf.FuncProto)
-	regIdx := 0
-	if sz, _ := btf.Sizeof(proto.Return); sz > 16 {
-		regIdx = 1
-	}
-	stackOff := 1
-
-	for _, p := range proto.Params {
-		arg := Arg{}
-		sz, _ := btf.Sizeof(p.Type)
-		if sz <= 8 && idxInReg(regIdx) {
-			arg.Type = REG
-			arg.IdxOff = uint32(regIdx)
-			regIdx += 1
-		} else if sz <= 16 && idxInReg(regIdx) && idxInReg(regIdx+1) {
-			arg.Type = REG
-			arg.IdxOff = uint32(regIdx)
-			regIdx += 2
-		} else {
-			arg.Type = STACK
-			arg.IdxOff = uint32(stackOff)
-			stackOff += (sz + 7) / 8
-		}
-		arg.Size = sz
-		f.args = append(f.args, arg)
-	}
-
-	sz, _ := btf.Sizeof(proto.Return)
-	if sz <= 16 {
-		f.ret = Arg{
-			RET_REG,
-			0,
-			sz,
-		}
-	} else {
-		f.ret = Arg{
-			STACK,
-			0,
-			sz,
-		}
-	}
-}
-
 func (f *FuncInfo) ShowPara(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 
 	if e.Id == 0 {
-		fmt.Fprintf(dst, "rdi=%#x rsi=%#x rdx=%#x rcx=%#x r8=%#x r9=%#x ",
-			e.Para[0],
-			e.Para[1],
-			e.Para[2],
-			e.Para[3],
-			e.Para[4],
-			e.Para[5])
+		for i := 0; i < MaxRegParas; i++ {
+			fmt.Fprintf(dst, "%s=%#x ", RegToStr[i], e.Para[i])
+		}
 		return
 	}
 
@@ -104,6 +48,10 @@ func (f *FuncInfo) ShowPara(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 		name := proto.Params[idx].Name
 		typ := proto.Params[idx].Type
 		off := arg.IdxOff
+		if arg.Type == REG_PTR || arg.Type == STACK_PTR {
+			fmt.Fprintf(dst, "%s=ENOTSUP ", name)
+			continue
+		}
 		if arg.Type == STACK {
 			off = arg.IdxOff + 8
 		}
@@ -125,21 +73,22 @@ func (f *FuncInfo) ShowPara(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 
 func (f *FuncInfo) ShowRet(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 	if e.Id == 0 {
-		fmt.Fprintf(dst, "rax=%#x", e.Ret[0])
+		fmt.Fprintf(dst, "%s=%#x", RetReg, e.Ret[0])
 		return
 	}
-
 	proto := f.Btfinfo.Type.(*btf.FuncProto)
-	typ := proto.Return
-
-	sz, _ := btf.Sizeof(typ)
-	if sz >= 16 {
-		sz = 16
+	off := 0
+	if f.ret.Type == RET_STACK {
+		off = 8
+	}
+	sz, _ := btf.Sizeof(proto.Return)
+	if off+sz >= 128 {
+		sz = 128 - int(off)
 	}
 
-	data := (*[16]byte)(unsafe.Pointer(&e.Ret[0]))
+	data := (*[128]byte)(unsafe.Pointer(&e.Ret[off]))
 	opt.Reset(data[:sz], false, 0, true)
-	opt.dumpDataByBTF("ret", typ, 0, 0, 0)
+	opt.dumpDataByBTF("ret", proto.Return, 0, 0, 0)
 	dst.WriteString(opt.String())
 }
 
@@ -196,6 +145,33 @@ func (f *FuncInfo) String() string {
 	}
 	return m + f.Name
 }
+
+// func (f *FuncInfo) Format(fs fmt.State, verb rune) {
+// 	if verb != 'v' && verb != 's' {
+// 		fmt.Fprintf(fs, "{UNRECOGNIZED: %c}", verb)
+// 		return
+// 	}
+// 	m := ""
+// 	if f.Module != "" {
+// 		m = f.Module + ":"
+// 	}
+// 	fmt.Fprintf(fs, "func:%q", m+f.Name)
+// 	if verb == 's' {
+// 		return
+// 	}
+// 	fmt.Fprintf(fs, " btfId %d", f.id)
+
+// 	for _, arg := range f.args {
+// 		loc := ""
+// 		switch arg.Type {
+// 		case REG:
+// 			loc = fmt.Sprintf("reg+%d", arg.IdxOff)
+// 		case STACK:
+// 			loc = fmt.Sprintf("reg+%d", arg.IdxOff)
+// 		}
+
+// 	}
+// }
 
 func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 
