@@ -26,16 +26,16 @@ const (
 	funcgraphArgAddrIMM_SHIFT   funcgraphArgAddr = 0
 )
 
-type funcgraphArgType uint32
+type funcgraphArgKind uint32
 
 const (
-	funcgraphArgTypeREG       funcgraphArgType = 0
-	funcgraphArgTypeSTACK     funcgraphArgType = 1
-	funcgraphArgTypeADDR      funcgraphArgType = 2
-	funcgraphArgTypeRET_REG   funcgraphArgType = 3
-	funcgraphArgTypeRET_STACK funcgraphArgType = 4
-	funcgraphArgTypeREG_PTR   funcgraphArgType = 5
-	funcgraphArgTypeSTACK_PTR funcgraphArgType = 6
+	funcgraphArgKindREG       funcgraphArgKind = 0
+	funcgraphArgKindSTACK     funcgraphArgKind = 1
+	funcgraphArgKindADDR      funcgraphArgKind = 2
+	funcgraphArgKindRET_REG   funcgraphArgKind = 3
+	funcgraphArgKindRET_STACK funcgraphArgKind = 4
+	funcgraphArgKindREG_PTR   funcgraphArgKind = 5
+	funcgraphArgKindSTACK_PTR funcgraphArgKind = 6
 )
 
 type funcgraphCallEvent struct {
@@ -126,7 +126,7 @@ const (
 )
 
 type funcgraphTraceData struct {
-	Arg         uint32
+	ArgKind     funcgraphArgKind
 	ArgLoc      uint32
 	FieldCnt    uint8
 	_           [1]byte

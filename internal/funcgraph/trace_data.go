@@ -2,22 +2,22 @@ package funcgraph
 
 import "github.com/cilium/ebpf/btf"
 
-type ArgType = funcgraphArgType
+type ArgKind = funcgraphArgKind
 
 const (
-	REG       ArgType = funcgraphArgTypeREG
-	STACK     ArgType = funcgraphArgTypeSTACK
-	ADDR      ArgType = funcgraphArgTypeADDR
-	RET_REG   ArgType = funcgraphArgTypeRET_REG
-	RET_STACK ArgType = funcgraphArgTypeRET_STACK
-	REG_PTR   ArgType = funcgraphArgTypeREG_PTR
-	STACK_PTR ArgType = funcgraphArgTypeSTACK_PTR
+	REG       ArgKind = funcgraphArgKindREG
+	STACK     ArgKind = funcgraphArgKindSTACK
+	ADDR      ArgKind = funcgraphArgKindADDR
+	RET_REG   ArgKind = funcgraphArgKindRET_REG
+	RET_STACK ArgKind = funcgraphArgKindRET_STACK
+	REG_PTR   ArgKind = funcgraphArgKindREG_PTR
+	STACK_PTR ArgKind = funcgraphArgKindSTACK_PTR
 )
 
 type TraceData struct {
 	name        string
 	onEntry     bool
-	argType     ArgType
+	argKind     ArgKind
 	IdxOff      uint32
 	typ         btf.Type
 	offsets     []uint16

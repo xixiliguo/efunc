@@ -57,7 +57,7 @@ volatile const u32 pid_deny_cnt = 0;
 
 volatile const u64 duration_ms = 0;
 
-enum arg_type {
+enum arg_kind {
     REG,
     STACK,
     ADDR,
@@ -87,7 +87,7 @@ enum trace_data_flags {
 #define read_bits(v, len, shift) ((v >> shift) & ((1 << len) - 1))
 
 struct trace_data {
-    u32 arg;
+    enum arg_kind arg_kind;
     u32 arg_loc;
     u8 field_cnt;
     u16 offsets[MAX_TRACE_FIELD_LEN];
@@ -214,7 +214,7 @@ struct {
 
 static const struct call_event empty_call_event;
 
-const enum arg_type *arg_type_unused __attribute__((unused));
+const enum arg_kind *arg_type_unused __attribute__((unused));
 const enum arg_addr *arg_addr_unused __attribute__((unused));
 const enum trace_constant *trace_constant_unused __attribute__((unused));
 const enum trace_data_flags *trace_data_flags_unused __attribute__((unused));
@@ -449,7 +449,7 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
 
         u32 idx_off = t->arg_loc;
 
-        switch (t->arg) {
+        switch (t->arg_kind) {
             case REG:
                 vals[0]= get_arg_reg_value(ctx, idx_off);
                 vals[1]= get_arg_reg_value(ctx, idx_off + 1);

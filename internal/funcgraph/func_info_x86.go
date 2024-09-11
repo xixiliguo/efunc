@@ -30,18 +30,19 @@ func (f *FuncInfo) InitArgsRet() {
 	for _, p := range proto.Params {
 		arg := Arg{
 			Name: p.Name,
+			Typ:  p.Type,
 		}
 		sz, _ := btf.Sizeof(p.Type)
 		if sz <= 8 && idxInReg(regIdx) {
-			arg.Type = REG
+			arg.Kind = REG
 			arg.IdxOff = uint32(regIdx)
 			regIdx += 1
 		} else if sz <= 16 && idxInReg(regIdx) && idxInReg(regIdx+1) {
-			arg.Type = REG
+			arg.Kind = REG
 			arg.IdxOff = uint32(regIdx)
 			regIdx += 2
 		} else {
-			arg.Type = STACK
+			arg.Kind = STACK
 			arg.IdxOff = uint32(stackOff)
 			stackOff += (sz + 7) / 8
 		}
@@ -51,8 +52,8 @@ func (f *FuncInfo) InitArgsRet() {
 
 	sz, _ := btf.Sizeof(proto.Return)
 	if sz <= 16 {
-		f.ret = Arg{"ret", RET_REG, 0, sz}
+		f.ret = Arg{"ret", RET_REG, 0, sz, proto.Return}
 	} else {
-		f.ret = Arg{"ret", RET_STACK, 0, sz}
+		f.ret = Arg{"ret", RET_STACK, 0, sz, proto.Return}
 	}
 }

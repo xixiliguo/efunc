@@ -18,9 +18,10 @@ const (
 
 type Arg struct {
 	Name   string
-	Type   ArgType
+	Kind   ArgKind
 	IdxOff uint32
 	Size   int
+	Typ    btf.Type
 }
 
 type FuncInfo struct {
@@ -43,16 +44,15 @@ func (f *FuncInfo) ShowPara(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 		return
 	}
 
-	proto := f.Btfinfo.Type.(*btf.FuncProto)
-	for idx, arg := range f.args {
-		name := proto.Params[idx].Name
-		typ := proto.Params[idx].Type
+	for _, arg := range f.args {
+		name := arg.Name
+		typ := arg.Typ
 		off := arg.IdxOff
-		if arg.Type == REG_PTR || arg.Type == STACK_PTR {
+		if arg.Kind == REG_PTR || arg.Kind == STACK_PTR {
 			fmt.Fprintf(dst, "%s=ENOTSUP ", name)
 			continue
 		}
-		if arg.Type == STACK {
+		if arg.Kind == STACK {
 			off = arg.IdxOff + 8
 		}
 		if off >= uint32(MaxParaLen) {
@@ -76,19 +76,19 @@ func (f *FuncInfo) ShowRet(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 		fmt.Fprintf(dst, "%s=%#x", RetReg, e.Ret[0])
 		return
 	}
-	proto := f.Btfinfo.Type.(*btf.FuncProto)
+
 	off := 0
-	if f.ret.Type == RET_STACK {
+	if f.ret.Kind == RET_STACK {
 		off = 8
 	}
-	sz, _ := btf.Sizeof(proto.Return)
+	sz, _ := btf.Sizeof(f.ret.Typ)
 	if off+sz >= 128 {
 		sz = 128 - int(off)
 	}
 
 	data := (*[128]byte)(unsafe.Pointer(&e.Ret[off]))
 	opt.Reset(data[:sz], false, 0, true)
-	opt.dumpDataByBTF("ret", proto.Return, 0, 0, 0)
+	opt.dumpDataByBTF("ret", f.ret.Typ, 0, 0, 0)
 	dst.WriteString(opt.String())
 }
 
@@ -187,7 +187,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 				if dataExpr.First.Name == para.Name {
 					t.name = para.Name
 					t.onEntry = true
-					t.argType = f.args[idx].Type
+					t.argKind = f.args[idx].Kind
 					t.IdxOff = f.args[idx].IdxOff
 					t.size = f.args[idx].Size
 					t.typ = para.Type
@@ -201,7 +201,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 		} else {
 			t.name = "ret"
 			t.onEntry = false
-			t.argType = f.ret.Type
+			t.argKind = f.ret.Kind
 			t.IdxOff = f.ret.IdxOff
 			t.size = f.ret.Size
 			t.typ = proto.Return
@@ -256,7 +256,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 			return fmt.Errorf("parsing %s %q: type(%s) of base is not pointer", f, dataExpr, baseType)
 		}
 
-		t.argType = ADDR
+		t.argKind = ADDR
 
 		t.IdxOff |= writeBits(t.IdxOff, uint32(funcgraphArgAddrBASE_LEN), uint32(funcgraphArgAddrBASE_SHIFT), base)
 		t.IdxOff |= writeBits(t.IdxOff, uint32(funcgraphArgAddrINDEX_LEN), uint32(funcgraphArgAddrINDEX_SHIFT), index)
