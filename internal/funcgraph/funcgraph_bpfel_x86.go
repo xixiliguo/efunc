@@ -74,7 +74,7 @@ type funcgraphFunc struct {
 	RetTrace    [7]funcgraphTraceData
 }
 
-type funcgraphFuncEntryEvent struct {
+type funcgraphFuncEvent struct {
 	Type     uint8
 	_        [7]byte
 	Task     uint64
@@ -86,26 +86,8 @@ type funcgraphFuncEntryEvent struct {
 	Id       uint32
 	HaveData bool
 	_        [3]byte
-	Time     uint64
-	Para     [16]uint64
-	Buf      [0]funcgraphEventData
-}
-
-type funcgraphFuncRetEvent struct {
-	Type     uint8
-	_        [7]byte
-	Task     uint64
-	CpuId    uint32
-	_        [4]byte
-	Depth    uint64
-	SeqId    uint64
-	Ip       uint64
-	Id       uint32
-	HaveData bool
-	_        [3]byte
-	Time     uint64
 	Duration uint64
-	Ret      [16]uint64
+	Records  [16]uint64
 	Buf      [0]funcgraphEventData
 }
 

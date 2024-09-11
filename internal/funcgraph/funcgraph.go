@@ -27,7 +27,7 @@ import (
 	"github.com/xixiliguo/efunc/internal/sysinfo"
 )
 
-//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 -type start_event -type func_entry_event -type func_ret_event -type trace_data -type arg_kind -type arg_addr -type trace_data_flags -type event_data -type trace_constant funcgraph funcgraph.bpf.c -- -I../include
+//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 -type start_event -type func_event -type trace_data -type arg_kind -type arg_addr -type trace_data_flags -type event_data -type trace_constant funcgraph funcgraph.bpf.c -- -I../include
 
 type Event uint8
 
@@ -827,7 +827,7 @@ func (fg *FuncGraph) Run() error {
 			empty.Reset()
 			fg.taskToEvents[startEvent.Task] = empty
 		case EntryEvent:
-			entryEvent := (*funcgraphFuncEntryEvent)(unsafe.Pointer(unsafe.SliceData(rec.RawSample)))
+			entryEvent := (*funcgraphFuncEvent)(unsafe.Pointer(unsafe.SliceData(rec.RawSample)))
 			task := entryEvent.Task
 			e := FuncEvent{
 				Type:  entryEvent.Type,
@@ -837,8 +837,8 @@ func (fg *FuncGraph) Run() error {
 				SeqId: entryEvent.SeqId,
 				Ip:    entryEvent.Ip,
 				Id:    entryEvent.Id,
-				Time:  entryEvent.Time,
-				Para:  entryEvent.Para,
+				// Time:  entryEvent.Time,
+				Para: entryEvent.Records,
 			}
 			if entryEvent.HaveData {
 				eventData := (*funcgraphEventData)(unsafe.Pointer(&entryEvent.Buf))
@@ -858,7 +858,7 @@ func (fg *FuncGraph) Run() error {
 			events.Add(e)
 			fg.taskToEvents[task] = events
 		case RetEvent:
-			retEvent := (*funcgraphFuncRetEvent)(unsafe.Pointer(unsafe.SliceData(rec.RawSample)))
+			retEvent := (*funcgraphFuncEvent)(unsafe.Pointer(unsafe.SliceData(rec.RawSample)))
 			// if err := binary.Read(bytes.NewBuffer(rec.RawSample), binary.LittleEndian, &retEvent); err != nil {
 			// 	fmt.Printf("parsing ringbuf event: %s\n", err)
 			// 	os.Exit(1)
@@ -867,16 +867,16 @@ func (fg *FuncGraph) Run() error {
 			// fmt.Printf("receive funcevent %+v\n", funcEvent)
 
 			e := FuncEvent{
-				Type:     retEvent.Type,
-				Task:     retEvent.Task,
-				CpuId:    retEvent.CpuId,
-				Depth:    retEvent.Depth,
-				SeqId:    retEvent.SeqId,
-				Ip:       retEvent.Ip,
-				Id:       retEvent.Id,
-				Time:     retEvent.Time,
+				Type:  retEvent.Type,
+				Task:  retEvent.Task,
+				CpuId: retEvent.CpuId,
+				Depth: retEvent.Depth,
+				SeqId: retEvent.SeqId,
+				Ip:    retEvent.Ip,
+				Id:    retEvent.Id,
+				// Time:     retEvent.Time,
 				Duration: retEvent.Duration,
-				Ret:      retEvent.Ret,
+				Ret:      retEvent.Records,
 			}
 
 			if retEvent.HaveData {
