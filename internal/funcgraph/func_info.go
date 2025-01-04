@@ -331,11 +331,19 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 		t.size = 1024
 	}
 
+	if arrTyp, ok := t.typ.(*btf.Array); ok {
+		if intTyp, ok := arrTyp.Type.(*btf.Int); ok {
+			if intTyp.Name == "char" {
+				t.isCharArray = true
+			}
+		}
+	}
+
 	if dataExpr.CompareInfo.Operator != "" {
 		t.CmpOperator = convertCMPOp(dataExpr.CompareInfo.Operator)
 		threshold := dataExpr.CompareInfo.Threshold
 
-		if t.isStr {
+		if t.isStr || t.isCharArray {
 			if target, err := threshold.ShowString(); err == nil {
 				t.TargetStr = target
 			} else {

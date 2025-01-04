@@ -82,6 +82,7 @@ enum trace_data_flags {
     DATA_STR = 1,
     DATA_DEREF = 2,
     DATA_SIGN = 4,
+    DATA_CHAR_ARRAY = 8,
 };
 
 #define read_bits(v, len, shift) ((v >> shift) & ((1 << len) - 1))
@@ -686,6 +687,7 @@ static __always_inline bool trace_data_allowed(struct event_data *buf, struct fu
 
         bool is_str = t->flags & DATA_STR;
         bool is_sign = t->flags & DATA_SIGN;
+        bool is_char_array = t->flags & DATA_CHAR_ARRAY;
 
         if (t->cmp_operator == CMP_NOP) {
             continue;
@@ -724,7 +726,7 @@ static __always_inline bool trace_data_allowed(struct event_data *buf, struct fu
 
         cmp_cnt++;
 
-        if (is_str) {
+        if (is_str || is_char_array) {
             int re = __str_contains(dst, t->target_str, t->target);
             if (t->cmp_operator == CMP_EQ && re == 0) {
                 cmp_cnt_allowed++;

@@ -125,9 +125,10 @@ type funcgraphTraceData struct {
 type funcgraphTraceDataFlags uint32
 
 const (
-	funcgraphTraceDataFlagsDATA_STR   funcgraphTraceDataFlags = 1
-	funcgraphTraceDataFlagsDATA_DEREF funcgraphTraceDataFlags = 2
-	funcgraphTraceDataFlagsDATA_SIGN  funcgraphTraceDataFlags = 4
+	funcgraphTraceDataFlagsDATA_STR        funcgraphTraceDataFlags = 1
+	funcgraphTraceDataFlagsDATA_DEREF      funcgraphTraceDataFlags = 2
+	funcgraphTraceDataFlagsDATA_SIGN       funcgraphTraceDataFlags = 4
+	funcgraphTraceDataFlagsDATA_CHAR_ARRAY funcgraphTraceDataFlags = 8
 )
 
 // loadFuncgraph returns the embedded CollectionSpec for funcgraph.
