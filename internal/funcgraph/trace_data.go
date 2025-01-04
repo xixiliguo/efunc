@@ -29,6 +29,7 @@ type TraceData struct {
 	isSign      bool
 	CmpOperator uint8
 	Target      uint64
+	TargetStr   string
 }
 
 func (t *TraceData) flags() (flag uint8) {

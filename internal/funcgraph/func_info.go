@@ -337,8 +337,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 
 		if t.isStr {
 			if target, err := threshold.ShowString(); err == nil {
-				tb := (*[8]byte)(unsafe.Pointer(&t.Target))
-				copy(tb[:], target)
+				t.TargetStr = target
 			} else {
 				return fmt.Errorf("parsing %s %q: %s fail to get string: %s", f, dataExpr, threshold, err)
 			}

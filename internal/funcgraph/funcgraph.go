@@ -573,13 +573,6 @@ func (fg *FuncGraph) load() error {
 		spec.Programs["funcret"].AttachType = ebpf.AttachTraceKprobeMulti
 	}
 
-	// opts := &ebpf.CollectionOptions{
-
-	// 	Programs: ebpf.ProgramOptions{
-	// 		LogLevel: ebpf.LogLevelBranch,
-	// 		LogSize:  math.MaxUint32 >> 2,
-	// 	},
-	// }
 	if err := spec.LoadAndAssign(&fg.objs, nil); err != nil {
 		var verifyError *ebpf.VerifierError
 		if errors.As(err, &verifyError) {
@@ -620,6 +613,15 @@ func (fg *FuncGraph) load() error {
 				CmpOperator: t.CmpOperator,
 				Target:      t.Target,
 			}
+
+			if len(t.TargetStr) != 0 {
+				strCnt := 0
+				for ; strCnt < 16 && strCnt < len(t.TargetStr); strCnt++ {
+					ft.TargetStr[strCnt] = int8(t.TargetStr[strCnt])
+				}
+				ft.Target = uint64(strCnt)
+			}
+
 			copy(ft.Offsets[:], t.offsets)
 			ft.FieldCnt = uint8(len(t.offsets))
 			f.Trace[i] = ft
@@ -639,6 +641,15 @@ func (fg *FuncGraph) load() error {
 				CmpOperator: t.CmpOperator,
 				Target:      t.Target,
 			}
+
+			if len(t.TargetStr) != 0 {
+				strCnt := 0
+				for ; strCnt < 16 && strCnt < len(t.TargetStr); strCnt++ {
+					ft.TargetStr[strCnt] = int8(t.TargetStr[strCnt])
+				}
+				ft.Target = uint64(strCnt)
+			}
+
 			copy(ft.Offsets[:], t.offsets)
 			ft.FieldCnt = uint8(len(t.offsets))
 			f.RetTrace[i] = ft

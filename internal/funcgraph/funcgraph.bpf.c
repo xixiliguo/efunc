@@ -97,6 +97,7 @@ struct trace_data {
     u8 flags;
     u8 cmp_operator;
     u64 target;
+    char target_str[16];
 };
 struct func {
     u32 id;
@@ -466,7 +467,9 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
                 index = (u8)(read_bits(idx_off, INDEX_LEN, INDEX_SHIFT));
                 scale = (s8)(read_bits(idx_off, SCALE_LEN, SCALE_SHIFT));
                 imm = (s16)(read_bits(idx_off, IMM_LEN, IMM_SHIFT));
-                
+                if (base >= MAX_TRACES) {
+                    continue;
+                }
                 s64 addr =0;
                 bpf_probe_read_kernel(&addr, 8,  &buf->data[buf->data_off[base]]);
                 if (scale != 0 && index < i) {
@@ -589,17 +592,71 @@ static __always_inline bool ret_trace_have_filter_expr(struct func *fn) {
     return false;
 }
 
-static __always_inline int __strncmp(const void *m1, const void *m2, size_t len) {
-        const unsigned char *s1 = m1;
-        const unsigned char *s2 = m2;
-        int i, delta = 0;
+struct strncmp_ctx {
+    const char *dst;
+    const u32 offset;
+    const char *target;
+    long result;
+};
 
-        for (i = 0; i < len; i++) {
-                delta = s1[i] - s2[i];
-                if (delta || s1[i] == 0 || s2[i] == 0)
-                        break;
-        }
-        return delta;
+static long strncmp_callback(u64 index, void *_ctx)
+{
+    struct strncmp_ctx *ctx = (struct strncmp_ctx *)_ctx;
+    if (index >= 16) {
+        return 1;
+    }
+    u32 dst_idx = index + ctx->offset;
+    if (dst_idx >= MAX_TRACE_DATA) {
+        return 1;
+    }
+    long delta = ctx->dst[dst_idx] - ctx->target[index];
+    ctx->result = delta;
+    if (delta || ctx->dst[dst_idx] == 0 || ctx->target[index] == 0) {
+        return 1;
+    }
+	return 0;
+}
+
+static __always_inline int __strncmp(const void *m1, const u32 offset, const void *m2, size_t len) {
+
+        struct strncmp_ctx ctx = {m1, offset, m2, 1};
+        bpf_loop(len, strncmp_callback, &ctx, 0);
+        return ctx.result;
+}
+
+struct str_contains_ctx {
+    char *dst;
+    const char *target;
+    const u32 target_len;
+    long result;
+};
+
+
+static long str_contains_callback(u64 index, void *_ctx)
+{
+    struct str_contains_ctx *ctx = (struct str_contains_ctx *)_ctx;
+    if (ctx->target_len > 16) {
+        return 1;
+    }
+    if (index > (MAX_TRACE_DATA - ctx->target_len) ) {
+        return 1;
+    }
+    if (ctx->dst[index] == 0) {
+        return 1;
+    }
+    if (__strncmp(ctx->dst, index, ctx->target, ctx->target_len) == 0) {
+        ctx->result = 0;
+        return 1;
+    }
+	return 0;
+}
+
+
+static __always_inline bool __str_contains(void *dst, const char * target, const u32 target_len) {
+    
+    struct str_contains_ctx ctx = {dst,target,target_len,1};
+	bpf_loop(1024, str_contains_callback, &ctx, 0);
+    return ctx.result;
 }
 
 static __always_inline bool trace_data_allowed(struct event_data *buf, struct func *fn,
@@ -668,7 +725,7 @@ static __always_inline bool trace_data_allowed(struct event_data *buf, struct fu
         cmp_cnt++;
 
         if (is_str) {
-            int re = __strncmp(dst, &t->target, 8);
+            int re = __str_contains(dst, t->target_str, t->target);
             if (t->cmp_operator == CMP_EQ && re == 0) {
                 cmp_cnt_allowed++;
             }

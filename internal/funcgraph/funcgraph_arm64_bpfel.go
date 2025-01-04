@@ -119,6 +119,7 @@ type funcgraphTraceData struct {
 	CmpOperator uint8
 	_           [6]byte
 	Target      uint64
+	TargetStr   [16]int8
 }
 
 type funcgraphTraceDataFlags uint32
