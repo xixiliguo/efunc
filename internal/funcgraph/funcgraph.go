@@ -785,6 +785,9 @@ func (fg *FuncGraph) Run() error {
 		select {
 		case <-fg.stopper:
 		case <-fg.targetCmdRecv:
+			if rd.AvailableBytes() != 0 {
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
 
 		if err := rd.Close(); err != nil {
