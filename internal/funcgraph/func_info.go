@@ -98,6 +98,7 @@ func (f *FuncInfo) ShowTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 		if off < 0 {
 			msg := fmt.Sprintf("%*s%s = Error(%d)", int(10+e.Depth)*2, " ", t.name, off)
 			dst.WriteString(msg)
+			dst.WriteByte('\n')
 			break
 		}
 		sz := t.size
@@ -121,6 +122,7 @@ func (f *FuncInfo) ShowRetTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer
 		if off < 0 {
 			msg := fmt.Sprintf("%*s%s = Error(%d)", int(10+e.Depth)*2, " ", t.name, off)
 			dst.WriteString(msg)
+			dst.WriteByte('\n')
 			break
 		}
 		sz := t.size
