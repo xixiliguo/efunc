@@ -335,7 +335,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 
 	if arrTyp, ok := t.typ.(*btf.Array); ok {
 		if intTyp, ok := arrTyp.Type.(*btf.Int); ok {
-			if intTyp.Name == "char" {
+			if intTyp.Size == 1 && strings.Contains(intTyp.Name, "char") {
 				t.isCharArray = true
 			}
 		}
