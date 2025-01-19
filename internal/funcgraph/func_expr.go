@@ -76,7 +76,8 @@ type Addr struct {
 }
 
 type Field struct {
-	Name string `parser:"ArrowOperator@(Ident (Period Ident)*)"`
+	Name  string `parser:"ArrowOperator@(Ident (Period Ident)*)"`
+	Index Value  `parser:"(LeftBracket @Number RightBracket)?"`
 }
 
 type Compare struct {
@@ -122,6 +123,8 @@ var funcParserFunc = sync.OnceValue[*participle.Parser[FuncExpr]](func() *partic
 		{Name: "Whitespace", Pattern: `[ \t]+`},
 		{Name: "Colon", Pattern: `:`},
 		{Name: "Period", Pattern: `\.`},
+		{Name: "LeftBracket", Pattern: `\[`},
+		{Name: "RightBracket", Pattern: `\]`},
 		{Name: "LeftEdge", Pattern: `\(`},
 		{Name: "RightEdge", Pattern: `\)`},
 		{Name: "Separator", Pattern: `,`},

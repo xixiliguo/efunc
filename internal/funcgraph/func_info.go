@@ -489,6 +489,26 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) er
 		// t.BitSize = bitSize
 	}
 
+	if index, err := f.Index.ShowSignNumber(); err == nil {
+		currStructType = btf.UnderlyingType(currStructType)
+		if typ, ok := currStructType.(*btf.Array); ok {
+			if index < 0 {
+				return fmt.Errorf("array index %+v must >= 0", index)
+			}
+			if uint32(index) >= typ.Nelems {
+				return fmt.Errorf("array index %+v should below %+v", index, typ.Nelems)
+			}
+			currStructType = typ.Type
+			if sz, err := btf.Sizeof(currStructType); err == nil {
+				offset += uint16(sz) * uint16(index)
+			} else {
+				return fmt.Errorf("%+v cannot get size: %s", currStructType, err)
+			}
+		} else {
+			return fmt.Errorf("%+v is not array", currStructType)
+		}
+	}
+
 	t.typ = currStructType
 	t.offsets = append(t.offsets, offset)
 	if sz, err := btf.Sizeof(currStructType); err == nil {
