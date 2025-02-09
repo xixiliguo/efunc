@@ -18,6 +18,7 @@ enum trace_constant {
     MAX_TRACES = 7,
     MAX_TRACE_DATA = 1024,
     MAX_TRACE_BUF =  5 * MAX_TRACE_DATA,
+    MAX_TARGET_LEN =  16,
 };
 
 #define CMP_NOP 0
@@ -593,70 +594,59 @@ static __always_inline bool ret_trace_have_filter_expr(struct func *fn) {
     return false;
 }
 
-struct strncmp_ctx {
-    const char *dst;
-    const u32 offset;
-    const char *target;
+struct str_contains_ctx {
+    char *dst;
+	u32 dst_start;
+    char *target;
     long result;
 };
 
-static long strncmp_callback(u64 index, void *_ctx)
-{
-    struct strncmp_ctx *ctx = (struct strncmp_ctx *)_ctx;
-    if (index >= 16) {
+
+static long str_callback(u64 index, void *_ctx) {
+	struct str_contains_ctx *ctx = (struct str_contains_ctx *)_ctx;
+	if (index >= MAX_TARGET_LEN) {
+		return 1;
+	}
+    if (ctx->target[index] == 0) {
         return 1;
     }
-    u32 dst_idx = index + ctx->offset;
-    if (dst_idx >= MAX_TRACE_DATA) {
+
+	u32 offset = ctx->dst_start + index;
+	if (offset >= MAX_TRACE_DATA) {
         return 1;
     }
-    long delta = ctx->dst[dst_idx] - ctx->target[index];
-    ctx->result = delta;
-    if (delta || ctx->dst[dst_idx] == 0 || ctx->target[index] == 0) {
-        return 1;
-    }
+	ctx->result = ctx->dst[offset] - ctx->target[index];
+	if (ctx->result) {
+		return 1;
+	}
 	return 0;
 }
 
-static __always_inline int __strncmp(const void *m1, const u32 offset, const void *m2, size_t len) {
 
-        struct strncmp_ctx ctx = {m1, offset, m2, 1};
-        bpf_loop(len, strncmp_callback, &ctx, 0);
-        return ctx.result;
-}
-
-struct str_contains_ctx {
-    char *dst;
-    const char *target;
-    const u32 target_len;
-    long result;
-};
-
-
-static long str_contains_callback(u64 index, void *_ctx)
-{
+static long str_contains_callback(u64 index, void *_ctx) {
     struct str_contains_ctx *ctx = (struct str_contains_ctx *)_ctx;
-    if (ctx->target_len > 16) {
-        return 1;
-    }
-    if (index > (MAX_TRACE_DATA - ctx->target_len) ) {
+	
+    if (index >= MAX_TRACE_DATA) {
         return 1;
     }
     if (ctx->dst[index] == 0) {
         return 1;
     }
-    if (__strncmp(ctx->dst, index, ctx->target, ctx->target_len) == 0) {
-        ctx->result = 0;
-        return 1;
-    }
+	ctx->dst_start = index;
+
+	bpf_loop(MAX_TARGET_LEN, str_callback, ctx, 0);
+	if (ctx->result == 0) {
+		return 1;
+	}
 	return 0;
 }
 
 
-static __always_inline bool __str_contains(void *dst, const char * target, const u32 target_len) {
+static __always_inline long __str_contains(void *dst, char *target) {
     
-    struct str_contains_ctx ctx = {dst,target,target_len,1};
-	bpf_loop(1024, str_contains_callback, &ctx, 0);
+    struct str_contains_ctx ctx = {dst, 0, target, 1};
+	bpf_loop(MAX_TRACE_DATA, str_contains_callback, &ctx, 0);
+    // bpf_printk("%s %s --> %d %d", dst, target, ctx.dst_start, ctx.result);
     return ctx.result;
 }
 
@@ -728,7 +718,7 @@ static long trace_allowed_callback(u64 index, void *_ctx)
     ctx->cmp_cnt++;
 
     if (is_str || is_char_array) {
-        int re = __str_contains(dst, t->target_str, t->target);
+        int re = __str_contains(dst, t->target_str);
         if (t->cmp_operator == CMP_EQ && re == 0) {
             ctx->cmp_cnt_allowed++;
         }

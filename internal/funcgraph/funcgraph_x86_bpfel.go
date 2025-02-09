@@ -104,6 +104,7 @@ const (
 	funcgraphTraceConstantMAX_TRACES          funcgraphTraceConstant = 7
 	funcgraphTraceConstantMAX_TRACE_DATA      funcgraphTraceConstant = 1024
 	funcgraphTraceConstantMAX_TRACE_BUF       funcgraphTraceConstant = 5120
+	funcgraphTraceConstantMAX_TARGET_LEN      funcgraphTraceConstant = 16
 )
 
 type funcgraphTraceData struct {
