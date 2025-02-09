@@ -500,6 +500,7 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) er
 			}
 			currStructType = typ.Type
 			if sz, err := btf.Sizeof(currStructType); err == nil {
+				f.Name += fmt.Sprintf("[%d]", index)
 				offset += uint16(sz) * uint16(index)
 			} else {
 				return fmt.Errorf("%+v cannot get size: %s", currStructType, err)
