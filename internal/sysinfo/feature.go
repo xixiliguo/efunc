@@ -110,6 +110,11 @@ func HaveBTFModule() bool {
 	return err == nil && h != nil
 }
 
+func HaveBPFLoop() bool {
+	err := features.HaveProgramHelper(ebpf.Kprobe, asm.FnLoop)
+	return err == nil
+}
+
 func ShowSysInfo() (string, error) {
 	buf := bytes.NewBuffer(make([]byte, 0, 4096))
 
@@ -131,6 +136,7 @@ func ShowSysInfo() (string, error) {
 	fmt.Fprintf(buf, "  ringbuf map: %t\n", HaveRingBuf())
 	fmt.Fprintf(buf, "  kprobeMulti: %t\n", HaveKprobeMulti())
 	fmt.Fprintf(buf, "  get_func_ip: %t\n", HaveGetFuncIP())
+	fmt.Fprintf(buf, "  bpf_loop: %t\n", HaveBPFLoop())
 
 	if offset, err := DetectRetOffset(); err != nil {
 		return "", err
