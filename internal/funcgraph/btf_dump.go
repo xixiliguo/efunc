@@ -110,7 +110,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			return -1
 		}
 		i := 0
-		for ; i < sz; i++ {
+		for ; i < sz && offset+i < len(data); i++ {
 			if data[offset+i] != 0 {
 				break
 			}
