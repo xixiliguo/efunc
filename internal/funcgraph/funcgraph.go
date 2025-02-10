@@ -568,7 +568,7 @@ func (fg *FuncGraph) load() error {
 
 	spec.Maps["events"].MaxEntries = fg.ringBufferSize
 
-	if fg.haveKprobeMulti {
+	if fg.haveKprobeMulti && fg.mode != "kprobe" {
 		spec.Programs["funcentry"].AttachType = ebpf.AttachTraceKprobeMulti
 		spec.Programs["funcret"].AttachType = ebpf.AttachTraceKprobeMulti
 	}
