@@ -128,7 +128,7 @@ var funcParserFunc = sync.OnceValue[*participle.Parser[FuncExpr]](func() *partic
 		{Name: "LeftEdge", Pattern: `\(`},
 		{Name: "RightEdge", Pattern: `\)`},
 		{Name: "Separator", Pattern: `,`},
-		{Name: "Operator", Pattern: `>=|>|==|!=|<=|<`},
+		{Name: "Operator", Pattern: `>=|>|==|!=|<=|<|~|!~`},
 		{Name: "Number", Pattern: `([-+]?0x[a-zA-Z_0-9]+)|([-+]?\d+)`},
 		{Name: "String", Pattern: `".*"`},
 	})

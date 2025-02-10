@@ -607,6 +607,10 @@ func convertCMPOp(op string) uint8 {
 		return 5
 	case "<=":
 		return 6
+	case "~":
+		return 7
+	case "!~":
+		return 8
 	}
 	return 0
 }

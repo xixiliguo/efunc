@@ -28,6 +28,8 @@ enum trace_constant {
 #define CMP_GE 4
 #define CMP_LT 5
 #define CMP_LE 6
+#define CMP_GLOB 7
+#define CMP_NOTGLOB 8
 
 #define CALL_EVENT 0
 #define START_EVENT 1
@@ -598,6 +600,7 @@ struct str_contains_ctx {
     char *dst;
 	u32 dst_start;
     char *target;
+    u32 flags;
     long result;
 };
 
@@ -607,7 +610,7 @@ static long str_callback(u64 index, void *_ctx) {
 	if (index >= MAX_TARGET_LEN) {
 		return 1;
 	}
-    if (ctx->target[index] == 0) {
+    if (ctx->target[index] == 0 && ctx->flags == 0) {
         return 1;
     }
 
@@ -635,16 +638,16 @@ static long str_contains_callback(u64 index, void *_ctx) {
 	ctx->dst_start = index;
 
 	bpf_loop(MAX_TARGET_LEN, str_callback, ctx, 0);
-	if (ctx->result == 0) {
-		return 1;
-	}
+	if (ctx->result == 0 || ctx->flags == 1) {
+        return 1;
+    }
 	return 0;
 }
 
 
-static __always_inline long __str_contains(void *dst, char *target) {
+static __always_inline long __str_contains(void *dst, char *target, u32 flags) {
     
-    struct str_contains_ctx ctx = {dst, 0, target, 1};
+    struct str_contains_ctx ctx = {dst, 0, target, flags};
 	bpf_loop(MAX_TRACE_DATA, str_contains_callback, &ctx, 0);
     // bpf_printk("%s %s --> %d %d", dst, target, ctx.dst_start, ctx.result);
     return ctx.result;
@@ -718,12 +721,24 @@ static long trace_allowed_callback(u64 index, void *_ctx)
     ctx->cmp_cnt++;
 
     if (is_str || is_char_array) {
-        int re = __str_contains(dst, t->target_str);
-        if (t->cmp_operator == CMP_EQ && re == 0) {
-            ctx->cmp_cnt_allowed++;
+        u32 flags = 1;
+        if (t->cmp_operator == CMP_GLOB || t->cmp_operator == CMP_NOTGLOB) {
+            flags = 0;
         }
-        if (t->cmp_operator == CMP_NOTEQ && re != 0) {
-            ctx->cmp_cnt_allowed++;
+        int re = __str_contains(dst, t->target_str, flags);
+        switch (t->cmp_operator) {
+            case CMP_EQ:
+            case CMP_GLOB:
+                if (re == 0) {
+                    ctx->cmp_cnt_allowed++;
+                }
+                break;
+            case CMP_NOTEQ:
+            case CMP_NOTGLOB:
+                if (re != 0) {
+                    ctx->cmp_cnt_allowed++;
+                }
+                break;
         }
     } else {
         switch (t->cmp_operator) {
