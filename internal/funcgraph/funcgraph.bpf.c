@@ -647,7 +647,7 @@ static long str_contains_callback(u64 index, void *_ctx) {
 
 static __always_inline long __str_contains(void *dst, char *target, u32 flags) {
     
-    struct str_contains_ctx ctx = {dst, 0, target, flags};
+    struct str_contains_ctx ctx = {dst, 0, target, flags, 1};
 	bpf_loop(MAX_TRACE_DATA, str_contains_callback, &ctx, 0);
     // bpf_printk("%s %s --> %d %d", dst, target, ctx.dst_start, ctx.result);
     return ctx.result;
