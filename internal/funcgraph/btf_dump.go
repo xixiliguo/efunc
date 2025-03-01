@@ -211,10 +211,9 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			opt.WriteStrings(toString(p))
 			return sz
 		}
-		cnt := strconv.FormatUint(uint64(t.Nelems), 10)
 		opt.WriteStrings(space, name, connector)
 		if !opt.compact {
-			opt.WriteStrings("(", opt.typString(t.Type), "[", cnt, "))")
+			opt.WriteStrings("(", opt.typString(t), ")")
 		}
 		opt.WriteStrings(" {", span)
 		sep := "\n"
