@@ -280,7 +280,10 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 			Target: structPtr,
 		}
 		t.typ = pointer
-		sz, _ := btf.Sizeof(pointer)
+		sz, err := btf.Sizeof(pointer)
+		if err != nil {
+			return fmt.Errorf("parsing %s %q: %s", f, dataExpr, err)
+		}
 		t.size = sz
 		btfData = pointer
 		dataExpr.Typ.Name = ""
@@ -324,7 +327,11 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 		t.typ = btfPointerData.Target
 		// t.Offsets = append(t.Offsets, 0)
 		t.isDefer = true
-		t.size, _ = btf.Sizeof(t.typ)
+		var err error
+		t.size, err = btf.Sizeof(t.typ)
+		if err != nil {
+			return fmt.Errorf("parsing %s %q: %s", f, dataExpr, err)
+		}
 		t.name = "*" + t.name
 	}
 
