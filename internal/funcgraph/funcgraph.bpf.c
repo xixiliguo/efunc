@@ -431,11 +431,12 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
             t = &fn->ret_trace[i];
         }
         if (t->size == 0) {
-            break;
+            buf->data_off[i] = buf->data_len;
+            continue;;
         }
         if (buf->data_len >= MAX_TRACE_BUF) {
             buf->data_off[i] = -1;
-            continue;
+            return;
         }
 
         dst = buf->data + buf->data_len;
@@ -573,9 +574,6 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
 static __always_inline bool trace_have_filter_expr(struct func *fn) {
     for (int i = 0; i < MAX_TRACES; i++) {
         struct trace_data *t = &fn->trace[i];
-        if (t->size == 0) {
-            break;
-        }
         if (t->cmp_operator != CMP_NOP) {
             return true;
         }
@@ -586,9 +584,6 @@ static __always_inline bool trace_have_filter_expr(struct func *fn) {
 static __always_inline bool ret_trace_have_filter_expr(struct func *fn) {
     for (int i = 0; i < MAX_TRACES; i++) {
         struct trace_data *t = &fn->ret_trace[i];
-        if (t->size == 0) {
-            break;
-        }
         if (t->cmp_operator != CMP_NOP) {
             return true;
         }
@@ -671,7 +666,7 @@ static long trace_allowed_callback(u64 index, void *_ctx)
     }
     struct trace_data *t = ctx->tp + index;
     if (t->size == 0) {
-        return 1;
+        return 0;
     }
     u16 sz = t->size;
 
@@ -688,10 +683,10 @@ static long trace_allowed_callback(u64 index, void *_ctx)
     }
 
     if (ctx->buf->data_off[index] < 0) {
-        return 0;
+        return 1;
     }
     if (ctx->buf->data_off[index] >= MAX_TRACE_BUF) {
-        return 0;
+        return 1;
     }
     void *dst = ctx->buf->data + ctx->buf->data_off[index];
 
