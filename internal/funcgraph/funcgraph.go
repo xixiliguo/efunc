@@ -626,7 +626,11 @@ func (fg *FuncGraph) load() error {
 			ft.FieldCnt = uint8(len(t.offsets))
 			f.Trace[i] = ft
 			f.TraceCnt++
+			if t.CmpOperator != 0 {
+				f.HaveFilter = true
+			}
 		}
+
 		for i, t := range fn.retTrace {
 			if i >= int(funcgraphTraceConstantMAX_TRACES) {
 				break
@@ -654,6 +658,9 @@ func (fg *FuncGraph) load() error {
 			ft.FieldCnt = uint8(len(t.offsets))
 			f.RetTrace[i] = ft
 			f.RetTraceCnt++
+			if t.CmpOperator != 0 {
+				f.HaveRetFilter = true
+			}
 		}
 		err = fg.objs.funcgraphMaps.FuncInfo.Update(fn.Addr, f, ebpf.UpdateAny)
 		if err != nil {

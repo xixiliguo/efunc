@@ -62,15 +62,17 @@ type funcgraphEventData struct {
 }
 
 type funcgraphFunc struct {
-	Id          uint32
-	IsMainEntry bool
-	Name        [40]int8
-	TraceCnt    uint8
-	_           [2]byte
-	Trace       [7]funcgraphTraceData
-	RetTraceCnt uint8
-	_           [7]byte
-	RetTrace    [7]funcgraphTraceData
+	Id            uint32
+	IsMainEntry   bool
+	Name          [40]int8
+	TraceCnt      uint8
+	HaveFilter    bool
+	_             [1]byte
+	Trace         [7]funcgraphTraceData
+	RetTraceCnt   uint8
+	HaveRetFilter bool
+	_             [6]byte
+	RetTrace      [7]funcgraphTraceData
 }
 
 type funcgraphFuncEvent struct {

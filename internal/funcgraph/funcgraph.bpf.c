@@ -108,8 +108,10 @@ struct func {
     bool is_main_entry;
     char name[MAX_FUNC_NAME_LEN];
     u8 trace_cnt;
+    bool have_filter;
     struct trace_data trace[MAX_TRACES];
     u8 ret_trace_cnt;
+    bool have_ret_filter;
     struct trace_data ret_trace[MAX_TRACES];
 };
 
@@ -571,26 +573,6 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
     }
 }
 
-static __always_inline bool trace_have_filter_expr(struct func *fn) {
-    for (int i = 0; i < MAX_TRACES; i++) {
-        struct trace_data *t = &fn->trace[i];
-        if (t->cmp_operator != CMP_NOP) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static __always_inline bool ret_trace_have_filter_expr(struct func *fn) {
-    for (int i = 0; i < MAX_TRACES; i++) {
-        struct trace_data *t = &fn->ret_trace[i];
-        if (t->cmp_operator != CMP_NOP) {
-            return true;
-        }
-    }
-    return false;
-}
-
 struct str_contains_ctx {
     char *dst;
 	u32 dst_start;
@@ -844,7 +826,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
             return 0;
         }
 
-        if (trace_have_filter_expr(fn)) {
+        if (fn->have_filter) {
             struct func_event *entry_info;
             entry_info = bpf_ringbuf_reserve(
                 &events, sizeof(struct func_event) + sizeof(struct event_data) + MAX_TRACE_BUF + MAX_TRACE_DATA, 0);
@@ -1084,7 +1066,7 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
             extract_func_ret(ret_info,ctx);
             ret_info->have_data = true;
             extract_data(ctx, true, fn, ret_info->buf);
-            if (d == 0 && ret_trace_have_filter_expr(fn) && trace_data_allowed(&ret_info->buf[0],fn,true) == false) {
+            if (d == 0 && fn->have_ret_filter && trace_data_allowed(&ret_info->buf[0],fn,true) == false) {
                 skip = true;
             }
             bpf_ringbuf_submit(ret_info, 0);
