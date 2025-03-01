@@ -327,28 +327,32 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			}
 		}
 	case *btf.Enum:
+		opt.WriteStrings(space, name, connector)
+		if !opt.compact {
+			opt.WriteStrings("(", opt.typString(t), ")")
+		}
+		more := false
+		unknown := true
+		var d uint64
 		if t.Signed {
-			d := *(*int32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)])))
-			for _, value := range t.Values {
-				if value.Value == uint64(d) {
-					opt.WriteStrings(space, name, connector)
-					if !opt.compact {
-						opt.WriteStrings("(", opt.typString(t), ")")
-					}
-					opt.WriteStrings(value.Name)
-				}
-			}
+			d = uint64(*(*int32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)]))))
+
 		} else {
-			d := *(*uint32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)])))
-			for _, value := range t.Values {
-				if value.Value == uint64(d) {
-					opt.WriteStrings(space, name, connector)
-					if !opt.compact {
-						opt.WriteStrings("(", opt.typString(t), ")")
-					}
-					opt.WriteStrings(value.Name)
+			d = uint64(*(*uint32)(unsafe.Pointer(unsafe.SliceData(data[offset : offset+int(t.Size)]))))
+		}
+		for _, value := range t.Values {
+			if value.Value == d {
+				if more {
+					opt.WriteStrings("|")
 				}
+				opt.WriteStrings(value.Name)
+				more = true
+				unknown = false
 			}
+		}
+		if unknown {
+			v := strconv.FormatUint(uint64(d), 10)
+			opt.WriteStrings("unkown(", v, ")")
 		}
 	case *btf.Void:
 		opt.WriteStrings(space, name, connector, "void")
