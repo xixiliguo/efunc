@@ -75,6 +75,13 @@ type funcgraphFunc struct {
 	RetTrace      [7]funcgraphTraceData
 }
 
+type funcgraphFuncBasic struct {
+	Id          uint32
+	IsMainEntry bool
+	Name        [40]int8
+	_           [3]byte
+}
+
 type funcgraphFuncEvent struct {
 	Type     uint8
 	_        [7]byte
@@ -186,13 +193,14 @@ type funcgraphProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type funcgraphMapSpecs struct {
-	CallEvents  *ebpf.MapSpec `ebpf:"call_events"`
-	CommsFilter *ebpf.MapSpec `ebpf:"comms_filter"`
-	EventStats  *ebpf.MapSpec `ebpf:"event_stats"`
-	Events      *ebpf.MapSpec `ebpf:"events"`
-	FuncInfo    *ebpf.MapSpec `ebpf:"func_info"`
-	PidsFilter  *ebpf.MapSpec `ebpf:"pids_filter"`
-	Ready       *ebpf.MapSpec `ebpf:"ready"`
+	CallEvents    *ebpf.MapSpec `ebpf:"call_events"`
+	CommsFilter   *ebpf.MapSpec `ebpf:"comms_filter"`
+	EventStats    *ebpf.MapSpec `ebpf:"event_stats"`
+	Events        *ebpf.MapSpec `ebpf:"events"`
+	FuncBasicInfo *ebpf.MapSpec `ebpf:"func_basic_info"`
+	FuncInfo      *ebpf.MapSpec `ebpf:"func_info"`
+	PidsFilter    *ebpf.MapSpec `ebpf:"pids_filter"`
+	Ready         *ebpf.MapSpec `ebpf:"ready"`
 }
 
 // funcgraphVariableSpecs contains global variables before they are loaded into the kernel.
@@ -238,13 +246,14 @@ func (o *funcgraphObjects) Close() error {
 //
 // It can be passed to loadFuncgraphObjects or ebpf.CollectionSpec.LoadAndAssign.
 type funcgraphMaps struct {
-	CallEvents  *ebpf.Map `ebpf:"call_events"`
-	CommsFilter *ebpf.Map `ebpf:"comms_filter"`
-	EventStats  *ebpf.Map `ebpf:"event_stats"`
-	Events      *ebpf.Map `ebpf:"events"`
-	FuncInfo    *ebpf.Map `ebpf:"func_info"`
-	PidsFilter  *ebpf.Map `ebpf:"pids_filter"`
-	Ready       *ebpf.Map `ebpf:"ready"`
+	CallEvents    *ebpf.Map `ebpf:"call_events"`
+	CommsFilter   *ebpf.Map `ebpf:"comms_filter"`
+	EventStats    *ebpf.Map `ebpf:"event_stats"`
+	Events        *ebpf.Map `ebpf:"events"`
+	FuncBasicInfo *ebpf.Map `ebpf:"func_basic_info"`
+	FuncInfo      *ebpf.Map `ebpf:"func_info"`
+	PidsFilter    *ebpf.Map `ebpf:"pids_filter"`
+	Ready         *ebpf.Map `ebpf:"ready"`
 }
 
 func (m *funcgraphMaps) Close() error {
@@ -253,6 +262,7 @@ func (m *funcgraphMaps) Close() error {
 		m.CommsFilter,
 		m.EventStats,
 		m.Events,
+		m.FuncBasicInfo,
 		m.FuncInfo,
 		m.PidsFilter,
 		m.Ready,

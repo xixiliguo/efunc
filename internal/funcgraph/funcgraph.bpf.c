@@ -103,6 +103,13 @@ struct trace_data {
     u64 target;
     char target_str[16];
 };
+
+struct func_basic {
+    u32 id;
+    bool is_main_entry;
+    char name[MAX_FUNC_NAME_LEN];
+};
+
 struct func {
     u32 id;
     bool is_main_entry;
@@ -193,6 +200,13 @@ struct {
     __type(key, u64);
     __type(value, bool);
 } ready SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 9999);
+    __type(key, u64);
+    __type(value, struct func_basic);
+} func_basic_info SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -806,11 +820,13 @@ static __always_inline void extract_func_ret(struct func_event *r,
 
 static __always_inline int handle_entry(struct pt_regs *ctx) {
     u64 ip = get_kprobe_func_ip(ctx);
-    struct func *fn = bpf_map_lookup_elem(&func_info, &ip);
-    if (!fn) {
+    struct func_basic *fn_basic = bpf_map_lookup_elem(&func_basic_info, &ip);
+    if (!fn_basic) {
         bpf_printk("no func info for kprobe addr 0x%px", ip);
         return 0;
     }
+
+    struct func *fn = bpf_map_lookup_elem(&func_info, &ip);
 
     u64 id = bpf_get_current_pid_tgid();
     u32 pid = id >> 32;
@@ -821,12 +837,12 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
     u64 task = bpf_get_current_task();
     e = bpf_map_lookup_elem(&call_events, &task);
     if (!e) {
-        if (fn->is_main_entry == false) {
-            vlog("non-main-entry func %s will not be traced when first time creating event", fn->name);
+        if (fn_basic->is_main_entry == false) {
+            vlog("non-main-entry func %s will not be traced when first time creating event", fn_basic->name);
             return 0;
         }
 
-        if (fn->have_filter) {
+        if (fn != NULL && fn->have_filter) {
             struct func_event *entry_info;
             entry_info = bpf_ringbuf_reserve(
                 &events, sizeof(struct func_event) + sizeof(struct event_data) + MAX_TRACE_BUF + MAX_TRACE_DATA, 0);
@@ -838,7 +854,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
                 entry_info->depth = 0;
                 entry_info->seq_id = 0;
                 entry_info->ip = ip;
-                entry_info->id = fn->id;
+                entry_info->id = fn_basic->id;
                 // entry_info->time = bpf_ktime_get_ns();
                 extract_func_paras(entry_info, ctx);
                 entry_info->have_data = true;
@@ -866,7 +882,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
         BPF_CORE_READ_INTO(&e->group_comm, tsk, group_leader, comm);
         e->start_time = bpf_ktime_get_ns();
         e->next_seq_id = 0;
-        vlog("create event 0x%px depth %d entry func %s", e, e->depth, fn->name);
+        vlog("create event 0x%px depth %d entry func %s", e, e->depth, fn_basic->name);
         struct start_event *start_info;
         start_info =
             bpf_ringbuf_reserve(&events, sizeof(struct start_event), 0);
@@ -890,8 +906,8 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
         return 0;
     }
 
-    if (d == 0 && fn->is_main_entry == false) {
-        vlog("func %s at depth 0 is not entry function",fn->name);
+    if (d == 0 && fn_basic->is_main_entry == false) {
+        vlog("func %s at depth 0 is not entry function",fn_basic->name);
         if (verbose) {
             print_call_event(e, "NON-MAIN-ENTRY-FUNC");
         }
@@ -899,7 +915,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
         return 0;
     }
 
-    if (fn->trace_cnt == 0) {
+    if (fn == NULL || fn->trace_cnt == 0) {
         struct func_event *entry_info;
         entry_info =
             bpf_ringbuf_reserve(&events, sizeof(struct func_event), 0);
@@ -913,7 +929,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
             entry_info->depth = d;
             entry_info->seq_id = e->next_seq_id;
             entry_info->ip = ip;
-            entry_info->id = fn->id;
+            entry_info->id = fn_basic->id;
             // entry_info->time = bpf_ktime_get_ns();
             extract_func_paras(entry_info, ctx);
             entry_info->have_data = false;
@@ -978,13 +994,15 @@ int funcentry(struct pt_regs *ctx) {
 
 static __always_inline int handle_ret(struct pt_regs *ctx) {
     u64 ip = get_kret_func_ip(ctx);
-    struct func *fn = bpf_map_lookup_elem(&func_info, &ip);
-    if (!fn) {
+    struct func_basic *fn_basic = bpf_map_lookup_elem(&func_basic_info, &ip);
+    if (!fn_basic) {
         if (verbose) {
             bpf_printk("no func info for kretprobe addr %llx", ip);
         }
         return 0;
     }
+
+    struct func *fn = bpf_map_lookup_elem(&func_info, &ip);
 
     u64 id = bpf_get_current_pid_tgid();
     u32 pid = id >> 32;
@@ -995,13 +1013,13 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
     u64 task = bpf_get_current_task();
     e = bpf_map_lookup_elem(&call_events, &task);
     if (!e) {
-        vlog("no call event when kretprobe func %s", fn->name);
+        vlog("no call event when kretprobe func %s", fn_basic->name);
         return 0;
     }
 
     u64 d = e->depth;
     if (d == 0) {
-        vlog("shoud not depth 0 during kretprobe func %s", task, fn->name);
+        vlog("shoud not depth 0 during kretprobe func %s", task, fn_basic->name);
         return 0;
     }
     d -= 1;
@@ -1024,7 +1042,7 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
 
     bool skip = false;
 
-    if (fn->ret_trace_cnt == 0) {
+    if (fn == NULL || fn->ret_trace_cnt == 0) {
         struct func_event *ret_info;
         ret_info =
             bpf_ringbuf_reserve(&events, sizeof(struct func_event), 0);
@@ -1038,7 +1056,7 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
             ret_info->depth = d;
             ret_info->seq_id = e->next_seq_id;
             ret_info->ip = ip;
-            ret_info->id = fn->id;
+            ret_info->id = fn_basic->id;
             // ret_info->time = bpf_ktime_get_ns();
             ret_info->duration = bpf_ktime_get_ns() - e->durations[d];
             extract_func_ret(ret_info,ctx);

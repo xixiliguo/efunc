@@ -593,6 +593,20 @@ func (fg *FuncGraph) load() error {
 		}
 		// copy(name[:], b)
 		// name[len(name)-1] = 0
+		basic := funcgraphFuncBasic{
+			Id:          uint32(fn.id),
+			IsMainEntry: fn.IsEntry,
+			Name:        name,
+		}
+		err = fg.objs.funcgraphMaps.FuncBasicInfo.Update(fn.Addr, basic, ebpf.UpdateAny)
+		if err != nil {
+			return err
+		}
+
+		if len(fn.trace) == 0 && len(fn.retTrace) == 0 {
+			continue
+		}
+
 		f := funcgraphFunc{
 			Id:          uint32(fn.id),
 			IsMainEntry: fn.IsEntry,
