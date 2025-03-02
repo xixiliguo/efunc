@@ -573,35 +573,34 @@ func (fg *FuncGraph) load() error {
 		spec.Programs["funcret"].AttachType = ebpf.AttachTraceKprobeMulti
 	}
 
-	if err := spec.LoadAndAssign(&fg.objs, nil); err != nil {
-		var verifyError *ebpf.VerifierError
-		if errors.As(err, &verifyError) {
-			fmt.Println(strings.Join(verifyError.Log, "\n"))
-			// fmt.Printf("%+v\n", verifyError)
-		}
-		return fmt.Errorf("spec LoadAndAssign: %w", err)
+	pidsSpec := spec.Maps["pids_filter"]
+	for p, action := range fg.pids {
+		pidsSpec.Contents = append(pidsSpec.Contents, ebpf.MapKV{Key: p, Value: action})
+	}
+	pidsSpec.MaxEntries = uint32(len(pidsSpec.Contents) + 1)
+	if fg.inheritChild {
+		pidsSpec.MaxEntries += 32
 	}
 
-	// fmt.Printf("%+v %s\n", fg.objs, err)
+	commSpec := spec.Maps["comms_filter"]
+	for comm, action := range fg.comms {
+		commSpec.Contents = append(commSpec.Contents, ebpf.MapKV{Key: comm, Value: action})
+	}
+	commSpec.MaxEntries = uint32(len(commSpec.Contents) + 1)
 
+	basicSpec := spec.Maps["func_basic_info"]
+	fnSpec := spec.Maps["func_info"]
 	for _, fn := range fg.funcs {
-
-		// b, _ := unix.ByteSliceFromString(fn.Name)
 		var name [40]int8
 		for i := 0; i < 40 && i < len(fn.Name); i++ {
 			name[i] = int8(fn.Name[i])
 		}
-		// copy(name[:], b)
-		// name[len(name)-1] = 0
 		basic := funcgraphFuncBasic{
 			Id:          uint32(fn.id),
 			IsMainEntry: fn.IsEntry,
 			Name:        name,
 		}
-		err = fg.objs.funcgraphMaps.FuncBasicInfo.Update(fn.Addr, basic, ebpf.UpdateAny)
-		if err != nil {
-			return err
-		}
+		basicSpec.Contents = append(basicSpec.Contents, ebpf.MapKV{Key: fn.Addr, Value: basic})
 
 		if len(fn.trace) == 0 && len(fn.retTrace) == 0 {
 			continue
@@ -612,7 +611,6 @@ func (fg *FuncGraph) load() error {
 			IsMainEntry: fn.IsEntry,
 			Name:        name,
 		}
-		// f.TraceCnt = uint8(len(fn.trace))
 		for i, t := range fn.trace {
 			if i >= int(funcgraphTraceConstantMAX_TRACES) {
 				break
@@ -676,25 +674,20 @@ func (fg *FuncGraph) load() error {
 				f.HaveRetFilter = true
 			}
 		}
-		err = fg.objs.funcgraphMaps.FuncInfo.Update(fn.Addr, f, ebpf.UpdateAny)
-		if err != nil {
-			return err
+		fnSpec.Contents = append(fnSpec.Contents, ebpf.MapKV{Key: fn.Addr, Value: f})
+	}
+	basicSpec.MaxEntries = uint32(len(basicSpec.Contents) + 1)
+	fnSpec.MaxEntries = uint32(len(fnSpec.Contents) + 1)
+
+	if err := spec.LoadAndAssign(&fg.objs, nil); err != nil {
+		var verifyError *ebpf.VerifierError
+		if errors.As(err, &verifyError) {
+			fmt.Println(strings.Join(verifyError.Log, "\n"))
+			// fmt.Printf("%+v\n", verifyError)
 		}
+		return fmt.Errorf("spec LoadAndAssign: %w", err)
 	}
 
-	for p, action := range fg.pids {
-		err = fg.objs.funcgraphMaps.PidsFilter.Update(p, action, ebpf.UpdateAny)
-		if err != nil {
-			return err
-		}
-	}
-
-	for comm, action := range fg.comms {
-		err = fg.objs.funcgraphMaps.CommsFilter.Update(comm, action, ebpf.UpdateAny)
-		if err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
