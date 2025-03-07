@@ -10,10 +10,8 @@ import (
 )
 
 const (
-	MaxParaLen      = funcgraphTraceConstantPARA_LEN
-	MaxLenPerTrace  = int(funcgraphTraceConstantMAX_TRACE_DATA)
-	MaxTraceDataLen = int(funcgraphTraceConstantMAX_TRACE_BUF)
-	MaxTraceCount   = int(funcgraphTraceConstantMAX_TRACES)
+	MaxParaLen    = funcgraphTraceConstantPARA_LEN
+	MaxTraceCount = int(funcgraphTraceConstantMAX_TRACES)
 )
 
 type Arg struct {
@@ -101,14 +99,12 @@ func (f *FuncInfo) ShowTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 			dst.WriteByte('\n')
 			break
 		}
-		sz := t.size
-		if sz > MaxLenPerTrace {
-			sz = MaxLenPerTrace
+
+		end := int32(e.DataLen)
+		if idx+1 < len(f.trace) && e.DataOff[idx+1] >= 0 {
+			end = e.DataOff[idx+1]
 		}
-		if int(off)+sz >= MaxTraceDataLen {
-			sz = MaxTraceDataLen - int(off)
-		}
-		opt.Reset(e.Data[off:int(off)+sz], t.isStr, int(10+e.Depth), false)
+		opt.Reset((*e.Data)[off:end], t.isStr, int(10+e.Depth), false)
 		o, s := t.bitOff, t.bitSize
 		opt.dumpDataByBTF(t.name, t.typ, 0, int(o), int(s))
 		dst.WriteString(opt.String())
@@ -125,14 +121,11 @@ func (f *FuncInfo) ShowRetTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer
 			dst.WriteByte('\n')
 			break
 		}
-		sz := t.size
-		if sz > 1024 {
-			sz = 1024
+		end := int32(e.DataLen)
+		if idx+1 < len(f.trace) && e.DataOff[idx+1] >= 0 {
+			end = e.DataOff[idx+1]
 		}
-		if int(off)+sz >= MaxTraceDataLen {
-			sz = MaxTraceDataLen - int(off)
-		}
-		opt.Reset(e.Data[off:int(off)+sz], t.isStr, int(10+e.Depth), false)
+		opt.Reset((*e.Data)[off:end], t.isStr, int(10+e.Depth), false)
 		o, s := t.bitOff, t.bitSize
 		opt.dumpDataByBTF(t.name, t.typ, 0, int(o), int(s))
 		dst.WriteString(opt.String())

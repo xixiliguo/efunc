@@ -180,12 +180,29 @@ ENVIRONMENT:
 						Usage: "only test purpose, do not load bpf prog",
 					},
 					&cli.UintFlag{
-						Name:  "max-entries",
-						Value: 16777216,
-						Usage: "`SIZE` of ringbuffer in bytes",
+						Name:  "max-trace-size",
+						Value: 1024,
+						Usage: "maximum `SIZE` of every trace data in bytes",
 						Action: func(ctx *cli.Context, u uint) error {
+							if u < 8 {
+								return fmt.Errorf("max-trace-size must not be allowed below 8")
+							}
 							if u&(u-1) != 0 {
-								return fmt.Errorf("max-entries must be pow of 2: %d", u)
+								return fmt.Errorf("max-trace-size must be pow of 2: %d", u)
+							}
+							return nil
+						},
+					},
+					&cli.UintFlag{
+						Name:  "max-ringbuf-size",
+						Value: 1024 * 1024 * 16,
+						Usage: "maximum `SIZE` of ringbuffer in bytes",
+						Action: func(ctx *cli.Context, u uint) error {
+							if u == 0 {
+								return fmt.Errorf("max-ringbuf-size must not be allowed to 0")
+							}
+							if u&(u-1) != 0 {
+								return fmt.Errorf("max-ringbuf-size must be pow of 2: %d", u)
 							}
 							return nil
 						},
@@ -293,7 +310,8 @@ ENVIRONMENT:
 						Verbose:           ctx.Bool("verbose"),
 						BpfLog:            ctx.Bool("bpf-log"),
 						DryRun:            ctx.Bool("dry-run"),
-						MaxEntries:        uint32(ctx.Uint("max-entries")),
+						MaxTraceSize:      uint32(ctx.Uint("max-trace-size")),
+						MaxRingSize:       uint32(ctx.Uint("max-ringbuf-size")),
 						Mode:              ctx.String("mode"),
 						Target:            ctx.String("command"),
 						InheritChild:      ctx.Bool("inherit"),

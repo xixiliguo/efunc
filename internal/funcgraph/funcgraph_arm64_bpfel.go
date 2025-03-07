@@ -56,8 +56,8 @@ type funcgraphCallEvent struct {
 }
 
 type funcgraphEventData struct {
-	DataLen uint16
-	DataOff [7]int16
+	DataLen uint32
+	DataOff [7]int32
 	Data    [0]uint8
 }
 
@@ -111,8 +111,6 @@ const (
 	funcgraphTraceConstantPARA_LEN            funcgraphTraceConstant = 16
 	funcgraphTraceConstantMAX_TRACE_FIELD_LEN funcgraphTraceConstant = 5
 	funcgraphTraceConstantMAX_TRACES          funcgraphTraceConstant = 7
-	funcgraphTraceConstantMAX_TRACE_DATA      funcgraphTraceConstant = 1024
-	funcgraphTraceConstantMAX_TRACE_BUF       funcgraphTraceConstant = 5120
 	funcgraphTraceConstantMAX_TARGET_LEN      funcgraphTraceConstant = 16
 )
 
@@ -122,12 +120,12 @@ type funcgraphTraceData struct {
 	FieldCnt    uint8
 	_           [1]byte
 	Offsets     [5]uint16
-	Size        uint16
+	Size        uint32
 	BitOff      uint8
 	BitSize     uint8
 	Flags       uint8
 	CmpOperator uint8
-	_           [6]byte
+	_           [4]byte
 	Target      uint64
 	TargetStr   [16]int8
 }
@@ -217,6 +215,8 @@ type funcgraphVariableSpecs struct {
 	HasBpfGetFuncIp      *ebpf.VariableSpec `ebpf:"has_bpf_get_func_ip"`
 	KretOffset           *ebpf.VariableSpec `ebpf:"kret_offset"`
 	MaxDepth             *ebpf.VariableSpec `ebpf:"max_depth"`
+	MaxTraceBuf          *ebpf.VariableSpec `ebpf:"max_trace_buf"`
+	MaxTraceData         *ebpf.VariableSpec `ebpf:"max_trace_data"`
 	PidAllowCnt          *ebpf.VariableSpec `ebpf:"pid_allow_cnt"`
 	PidDenyCnt           *ebpf.VariableSpec `ebpf:"pid_deny_cnt"`
 	StartUnused          *ebpf.VariableSpec `ebpf:"start_unused"`
@@ -283,6 +283,8 @@ type funcgraphVariables struct {
 	HasBpfGetFuncIp      *ebpf.Variable `ebpf:"has_bpf_get_func_ip"`
 	KretOffset           *ebpf.Variable `ebpf:"kret_offset"`
 	MaxDepth             *ebpf.Variable `ebpf:"max_depth"`
+	MaxTraceBuf          *ebpf.Variable `ebpf:"max_trace_buf"`
+	MaxTraceData         *ebpf.Variable `ebpf:"max_trace_data"`
 	PidAllowCnt          *ebpf.Variable `ebpf:"pid_allow_cnt"`
 	PidDenyCnt           *ebpf.Variable `ebpf:"pid_deny_cnt"`
 	StartUnused          *ebpf.Variable `ebpf:"start_unused"`

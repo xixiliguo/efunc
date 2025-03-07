@@ -66,7 +66,8 @@ type Option struct {
 	Verbose           bool
 	BpfLog            bool
 	DryRun            bool
-	MaxEntries        uint32
+	MaxTraceSize      uint32
+	MaxRingSize       uint32
 	Mode              string
 	Target            string
 	InheritChild      bool
@@ -84,9 +85,9 @@ type FuncEvent struct {
 	Id       uint32
 	Time     uint64
 	Para     [funcgraphTraceConstantPARA_LEN]uint64
-	DataLen  uint16
-	DataOff  [MaxTraceCount]int16
-	Data     *[MaxTraceDataLen]uint8
+	DataLen  uint32
+	DataOff  [MaxTraceCount]int32
+	Data     *[]uint8
 	Duration uint64
 	Ret      [funcgraphTraceConstantPARA_LEN]uint64
 }
@@ -119,63 +120,66 @@ var defaultDenyFuncs = []string{
 }
 
 type FuncGraph struct {
-	funcs           []*FuncInfo
-	links           []link.Link
-	idToFuncs       map[btf.TypeID]*FuncInfo
-	verbose         bool
-	bpfLog          bool
-	dryRun          bool
-	ringBufferSize  uint32
-	mode            string
-	allow_pid_cnt   uint32
-	deny_pid_cnt    uint32
-	pids            map[uint32]bool
-	allow_comm_cnt  uint32
-	deny_comm_cnt   uint32
-	comms           map[[16]uint8]bool
-	ksyms           *KSymCache
-	haveKprobeMulti bool
-	haveGetFuncIP   bool
-	kretOffset      uint64
-	bootTime        uint64
-	taskToEvents    map[uint64]*FuncEvents
-	eventsPool      sync.Pool
-	dataPool        sync.Pool
-	buf             *bytes.Buffer
-	output          *os.File
-	stopper         chan os.Signal
-	objs            funcgraphObjects
-	opt             *dumpOption
-	spaceCache      [1024]byte
-	targetCmd       *exec.Cmd
-	targetCmdError  error
-	targetCmdRecv   chan int
-	targetCmdSend   chan int
-	inheritChild    bool
-	duration        uint64
-	depth           uint64
+	funcs             []*FuncInfo
+	links             []link.Link
+	idToFuncs         map[btf.TypeID]*FuncInfo
+	verbose           bool
+	bpfLog            bool
+	dryRun            bool
+	maxTraceSize      uint32
+	maxTraceEventSize uint32
+	maxRingBufferSize uint32
+	mode              string
+	allow_pid_cnt     uint32
+	deny_pid_cnt      uint32
+	pids              map[uint32]bool
+	allow_comm_cnt    uint32
+	deny_comm_cnt     uint32
+	comms             map[[16]uint8]bool
+	ksyms             *KSymCache
+	haveKprobeMulti   bool
+	haveGetFuncIP     bool
+	kretOffset        uint64
+	bootTime          uint64
+	taskToEvents      map[uint64]*FuncEvents
+	eventsPool        sync.Pool
+	dataPool          sync.Pool
+	buf               *bytes.Buffer
+	output            *os.File
+	stopper           chan os.Signal
+	objs              funcgraphObjects
+	opt               *dumpOption
+	spaceCache        [1024]byte
+	targetCmd         *exec.Cmd
+	targetCmdError    error
+	targetCmdRecv     chan int
+	targetCmdSend     chan int
+	inheritChild      bool
+	duration          uint64
+	depth             uint64
 }
 
 func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 
 	opt.DenyFuncs = append(opt.DenyFuncs, defaultDenyFuncs...)
 	fg := &FuncGraph{
-		verbose:        opt.Verbose,
-		bpfLog:         opt.BpfLog,
-		dryRun:         opt.DryRun,
-		output:         os.Stdout,
-		ringBufferSize: opt.MaxEntries,
-		mode:           opt.Mode,
-		idToFuncs:      map[btf.TypeID]*FuncInfo{},
-		pids:           map[uint32]bool{},
-		comms:          map[[16]uint8]bool{},
-		taskToEvents:   map[uint64]*FuncEvents{},
-		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
-		targetCmdRecv:  make(chan int),
-		targetCmdSend:  make(chan int),
-		inheritChild:   opt.InheritChild,
-		duration:       opt.Duration,
-		depth:          opt.Depth,
+		verbose:           opt.Verbose,
+		bpfLog:            opt.BpfLog,
+		dryRun:            opt.DryRun,
+		output:            os.Stdout,
+		maxTraceSize:      opt.MaxTraceSize,
+		maxRingBufferSize: opt.MaxRingSize,
+		mode:              opt.Mode,
+		idToFuncs:         map[btf.TypeID]*FuncInfo{},
+		pids:              map[uint32]bool{},
+		comms:             map[[16]uint8]bool{},
+		taskToEvents:      map[uint64]*FuncEvents{},
+		buf:               bytes.NewBuffer(make([]byte, 0, 4096)),
+		targetCmdRecv:     make(chan int),
+		targetCmdSend:     make(chan int),
+		inheritChild:      opt.InheritChild,
+		duration:          opt.Duration,
+		depth:             opt.Depth,
 	}
 	for i := 0; i < len(fg.spaceCache); i++ {
 		fg.spaceCache[i] = ' '
@@ -188,11 +192,6 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 		New: func() interface{} {
 			e := make(FuncEvents, 0, 64)
 			return &e
-		},
-	}
-	fg.dataPool = sync.Pool{
-		New: func() interface{} {
-			return &[MaxTraceDataLen]uint8{}
 		},
 	}
 
@@ -551,23 +550,6 @@ func (fg *FuncGraph) load() error {
 		return fmt.Errorf("load funcgraph: %w", err)
 	}
 
-	consts := make(map[string]interface{})
-	consts["has_bpf_get_func_ip"] = fg.haveGetFuncIP
-	consts["kret_offset"] = fg.kretOffset
-	consts["verbose"] = fg.bpfLog
-	consts["pid_allow_cnt"] = fg.allow_pid_cnt
-	consts["pid_deny_cnt"] = fg.deny_pid_cnt
-	consts["comm_allow_cnt"] = fg.allow_comm_cnt
-	consts["comm_deny_cnt"] = fg.deny_comm_cnt
-	consts["duration_ms"] = fg.duration
-	consts["max_depth"] = uint8(fg.depth)
-
-	if err := spec.RewriteConstants(consts); err != nil {
-		return fmt.Errorf("spec RewriteConstants: %w", err)
-	}
-
-	spec.Maps["events"].MaxEntries = fg.ringBufferSize
-
 	if fg.haveKprobeMulti && fg.mode != "kprobe" {
 		spec.Programs["funcentry"].AttachType = ebpf.AttachTraceKprobeMulti
 		spec.Programs["funcret"].AttachType = ebpf.AttachTraceKprobeMulti
@@ -588,6 +570,7 @@ func (fg *FuncGraph) load() error {
 	}
 	commSpec.MaxEntries = uint32(len(commSpec.Contents) + 1)
 
+	maxAllTraceSize := uint32(0)
 	basicSpec := spec.Maps["func_basic_info"]
 	fnSpec := spec.Maps["func_info"]
 	for _, fn := range fg.funcs {
@@ -606,6 +589,8 @@ func (fg *FuncGraph) load() error {
 			continue
 		}
 
+		entryTraceSize := uint32(0)
+		retTraceSize := uint32(0)
 		f := funcgraphFunc{
 			Id:          uint32(fn.id),
 			IsMainEntry: fn.IsEntry,
@@ -618,13 +603,18 @@ func (fg *FuncGraph) load() error {
 			ft := funcgraphTraceData{
 				ArgKind:     t.argKind,
 				ArgLoc:      t.IdxOff,
-				Size:        uint16(t.size),
+				Size:        uint32(t.size),
 				BitOff:      t.bitOff,
 				BitSize:     t.bitSize,
 				Flags:       t.flags(),
 				CmpOperator: t.CmpOperator,
 				Target:      t.Target,
 			}
+			if uint32(t.size) > fg.maxTraceSize {
+				fmt.Printf("func %s %s: size %d exceed %d\n", fn.String(), t.name, t.size, fg.maxTraceSize)
+			}
+
+			entryTraceSize += (min(fg.maxTraceSize, uint32(t.size)) + 7) / 8 * 8
 
 			if len(t.TargetStr) != 0 {
 				strCnt := 0
@@ -650,13 +640,17 @@ func (fg *FuncGraph) load() error {
 			ft := funcgraphTraceData{
 				ArgKind:     t.argKind,
 				ArgLoc:      t.IdxOff,
-				Size:        uint16(t.size),
+				Size:        uint32(t.size),
 				BitOff:      t.bitOff,
 				BitSize:     t.bitSize,
 				Flags:       t.flags(),
 				CmpOperator: t.CmpOperator,
 				Target:      t.Target,
 			}
+			if uint32(t.size) > fg.maxTraceSize {
+				fmt.Printf("func %s %s: size %d exceed %d\n", fn.String(), t.name, t.size, fg.maxTraceSize)
+			}
+			retTraceSize += (min(fg.maxTraceSize, uint32(t.size)) + 7) / 8 * 8
 
 			if len(t.TargetStr) != 0 {
 				strCnt := 0
@@ -674,10 +668,40 @@ func (fg *FuncGraph) load() error {
 				f.HaveRetFilter = true
 			}
 		}
+
+		maxAllTraceSize += max(entryTraceSize, retTraceSize)
 		fnSpec.Contents = append(fnSpec.Contents, ebpf.MapKV{Key: fn.Addr, Value: f})
 	}
 	basicSpec.MaxEntries = uint32(len(basicSpec.Contents) + 1)
 	fnSpec.MaxEntries = uint32(len(fnSpec.Contents) + 1)
+
+	spec.Maps["events"].MaxEntries = fg.maxRingBufferSize
+
+	consts := make(map[string]interface{})
+	consts["has_bpf_get_func_ip"] = fg.haveGetFuncIP
+	consts["kret_offset"] = fg.kretOffset
+	consts["verbose"] = fg.bpfLog
+	consts["pid_allow_cnt"] = fg.allow_pid_cnt
+	consts["pid_deny_cnt"] = fg.deny_pid_cnt
+	consts["comm_allow_cnt"] = fg.allow_comm_cnt
+	consts["comm_deny_cnt"] = fg.deny_comm_cnt
+	consts["duration_ms"] = fg.duration
+	consts["max_depth"] = uint8(fg.depth)
+
+	fmt.Printf("max trace size is %d bytes, max trace event size is %d bytes\n", fg.maxTraceSize, maxAllTraceSize)
+	consts["max_trace_data"] = fg.maxTraceSize
+	consts["max_trace_buf"] = maxAllTraceSize
+	fg.maxTraceEventSize = maxAllTraceSize
+	fg.dataPool = sync.Pool{
+		New: func() interface{} {
+			d := make([]uint8, maxAllTraceSize)
+			return &d
+		},
+	}
+
+	if err := spec.RewriteConstants(consts); err != nil {
+		return fmt.Errorf("spec RewriteConstants: %w", err)
+	}
 
 	if err := spec.LoadAndAssign(&fg.objs, nil); err != nil {
 		var verifyError *ebpf.VerifierError
@@ -872,9 +896,9 @@ func (fg *FuncGraph) Run() error {
 				eventData := (*funcgraphEventData)(unsafe.Pointer(&entryEvent.Buf))
 				e.DataLen = eventData.DataLen
 				e.DataOff = eventData.DataOff
-				empty := fg.dataPool.Get().(*[MaxTraceDataLen]uint8)
+				empty := fg.dataPool.Get().(*[]uint8)
 				e.Data = empty
-				copy(e.Data[:], unsafe.Slice(unsafe.SliceData(eventData.Data[:]), MaxTraceDataLen))
+				copy(*e.Data, unsafe.Slice(unsafe.SliceData(eventData.Data[:]), fg.maxTraceEventSize))
 			}
 			// funcInfo :=
 			// if entryEvent.HaveData {
@@ -911,9 +935,9 @@ func (fg *FuncGraph) Run() error {
 				eventData := (*funcgraphEventData)(unsafe.Pointer(&retEvent.Buf))
 				e.DataLen = eventData.DataLen
 				e.DataOff = eventData.DataOff
-				empty := fg.dataPool.Get().(*[MaxTraceDataLen]uint8)
+				empty := fg.dataPool.Get().(*[]uint8)
 				e.Data = empty
-				copy(e.Data[:], unsafe.Slice(unsafe.SliceData(eventData.Data[:]), MaxTraceDataLen))
+				copy(*e.Data, unsafe.Slice(unsafe.SliceData(eventData.Data[:]), fg.maxTraceEventSize))
 			}
 
 			events := fg.taskToEvents[task]

@@ -16,10 +16,12 @@ enum trace_constant {
     PARA_LEN = 16,
     MAX_TRACE_FIELD_LEN = 5,
     MAX_TRACES = 7,
-    MAX_TRACE_DATA = 1024,
-    MAX_TRACE_BUF =  5 * MAX_TRACE_DATA,
     MAX_TARGET_LEN =  16,
 };
+
+
+#define EINVAL          22
+#define ENOBUFS         105
 
 #define CMP_NOP 0
 #define CMP_EQ 1
@@ -46,6 +48,10 @@ enum trace_constant {
 #define RET_EVENT_DROP 7
 
 #define vlog(fmt, ...) do { if (verbose) { bpf_printk(fmt, ##__VA_ARGS__); }  } while (0)
+
+volatile const u32 max_trace_data = 1024;
+volatile const u32 max_trace_buf = 4096;
+
 
 volatile const bool verbose = false;
 volatile const bool has_bpf_get_func_ip = false;
@@ -95,7 +101,7 @@ struct trace_data {
     u32 arg_loc;
     u8 field_cnt;
     u16 offsets[MAX_TRACE_FIELD_LEN];
-    u16 size;
+    u32 size;
     u8 bit_off;
     u8 bit_size;
     u8 flags;
@@ -128,8 +134,8 @@ struct start_event {
 };
 
 struct event_data {
-    u16 data_len;
-    s16 data_off[MAX_TRACES];
+    u32 data_len;
+    s32 data_off[MAX_TRACES];
     u8 data[0];
 };
 
@@ -450,21 +456,17 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
             buf->data_off[i] = buf->data_len;
             continue;;
         }
-        if (buf->data_len >= MAX_TRACE_BUF) {
-            buf->data_off[i] = -1;
+        if (buf->data_len >= max_trace_buf) {
+            buf->data_off[i] = -ENOBUFS;
             return;
         }
 
         dst = buf->data + buf->data_len;
-        u16 sz = t->size;
+        u32 sz = t->size;
         u32 reg_idx, stack_off;
         u8 base, index;
         s8 scale;
         s16 imm;
-        
-        if (sz == 0) {
-            break;
-        }
 
         
         u64 vals[2];
@@ -489,22 +491,35 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
                 scale = (s8)(read_bits(idx_off, SCALE_LEN, SCALE_SHIFT));
                 imm = (s16)(read_bits(idx_off, IMM_LEN, IMM_SHIFT));
                 if (base >= MAX_TRACES) {
-                    continue;
+                    buf->data_off[i] = -EINVAL;
+                    return;
                 }
                 s64 addr =0;
+                s32 idx = buf->data_off[base];
+                if (idx < 0 || idx >= max_trace_buf) {
+                    buf->data_off[i] = -EINVAL;
+                    return;
+                }
                 bpf_probe_read_kernel(&addr, 8,  &buf->data[buf->data_off[base]]);
                 if (scale != 0 && index < i) {
                     s64 index_data = 0;
                     barrier_var(index);
                     if (index >= MAX_TRACES) {
-                        continue;
+                        buf->data_off[i] = -EINVAL;
+                        return;
                     }
                     u16 index_sz = fn->trace[index].size;
                     if (is_ret) {
                         index_sz = fn->ret_trace[index].size;
                     }
                     if (index_sz > 8) {
-                        continue;
+                        buf->data_off[i] = -EINVAL;
+                        return;
+                    }
+                    s32 idx = buf->data_off[index];
+                    if (idx < 0 || idx >= max_trace_buf) {
+                        buf->data_off[i] = -EINVAL;
+                        return;
                     }
                     bpf_probe_read_kernel(&index_data, index_sz, &buf->data[buf->data_off[index]]);
                     addr += index_data * scale;
@@ -549,20 +564,20 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
             data_ptr += t->offsets[idx];
         }
 
-        if (sz > MAX_TRACE_DATA) {
-            sz = MAX_TRACE_DATA;
+        if (sz > max_trace_data) {
+            sz = max_trace_data;
         }
 
 
-        s16 err;
+        s32 err;
         if (t->flags & DATA_STR) {
             bpf_probe_read_kernel(&data_ptr, sizeof(data_ptr),
                                   (void *)data_ptr);
             if ((long)data_ptr <= 0) {
-                err  = bpf_probe_read_kernel_str(dst, MAX_TRACE_DATA,
+                err  = bpf_probe_read_kernel_str(dst, max_trace_data,
                                            (void *)data_ptr);
             } else {
-                err  = bpf_probe_read_user_str(dst, MAX_TRACE_DATA,
+                err  = bpf_probe_read_user_str(dst, max_trace_data,
                                            (void *)data_ptr);
             }
             sz = err;
@@ -606,7 +621,7 @@ static long str_callback(u64 index, void *_ctx) {
     }
 
 	u32 offset = ctx->dst_start + index;
-	if (offset >= MAX_TRACE_DATA) {
+	if (offset >= max_trace_data) {
         return 1;
     }
 	ctx->result = ctx->dst[offset] - ctx->target[index];
@@ -620,7 +635,7 @@ static long str_callback(u64 index, void *_ctx) {
 static long str_contains_callback(u64 index, void *_ctx) {
     struct str_contains_ctx *ctx = (struct str_contains_ctx *)_ctx;
 	
-    if (index >= MAX_TRACE_DATA) {
+    if (index >= max_trace_data) {
         return 1;
     }
     if (ctx->dst[index] == 0) {
@@ -639,7 +654,7 @@ static long str_contains_callback(u64 index, void *_ctx) {
 static __always_inline long __str_contains(void *dst, char *target, u32 flags) {
     
     struct str_contains_ctx ctx = {dst, 0, target, flags, 1};
-	bpf_loop(MAX_TRACE_DATA, str_contains_callback, &ctx, 0);
+	bpf_loop(max_trace_data, str_contains_callback, &ctx, 0);
     // bpf_printk("%s %s --> %d %d", dst, target, ctx.dst_start, ctx.result);
     return ctx.result;
 }
@@ -681,7 +696,7 @@ static long trace_allowed_callback(u64 index, void *_ctx)
     if (ctx->buf->data_off[index] < 0) {
         return 1;
     }
-    if (ctx->buf->data_off[index] >= MAX_TRACE_BUF) {
+    if (ctx->buf->data_off[index] >= max_trace_buf) {
         return 1;
     }
     void *dst = ctx->buf->data + ctx->buf->data_off[index];
@@ -845,7 +860,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
         if (fn != NULL && fn->have_filter) {
             struct func_event *entry_info;
             entry_info = bpf_ringbuf_reserve(
-                &events, sizeof(struct func_event) + sizeof(struct event_data) + MAX_TRACE_BUF + MAX_TRACE_DATA, 0);
+                &events, sizeof(struct func_event) + sizeof(struct event_data) + max_trace_buf + max_trace_data, 0);
             if (!entry_info) {
             } else {
                 entry_info->type = ENTRY_EVENT;
@@ -941,7 +956,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
     } else {
         struct func_event *entry_info;
         entry_info = bpf_ringbuf_reserve(
-            &events, sizeof(struct func_event) + sizeof(struct event_data) + MAX_TRACE_BUF + MAX_TRACE_DATA, 0);
+            &events, sizeof(struct func_event) + sizeof(struct event_data) + max_trace_buf + max_trace_data, 0);
         if (!entry_info) {
             update_event_stat(ENTRY_EVENT_DROP);
         } else {
@@ -1067,7 +1082,7 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
     } else {
         struct func_event *ret_info;
         ret_info = bpf_ringbuf_reserve(
-            &events, sizeof(struct func_event) + sizeof(struct event_data) + MAX_TRACE_BUF + MAX_TRACE_DATA, 0);
+            &events, sizeof(struct func_event) + sizeof(struct event_data) + max_trace_buf + max_trace_data, 0);
         if (!ret_info) {
             update_event_stat(RET_EVENT_DROP);
         } else {
