@@ -230,7 +230,7 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 9999);
+    __uint(max_entries, 256);
     __type(key, u64);
     __type(value, struct call_event);
 } call_events SEC(".maps");

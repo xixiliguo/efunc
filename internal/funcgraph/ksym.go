@@ -3,28 +3,21 @@ package funcgraph
 import (
 	"bufio"
 	"bytes"
+	"errors"
+	"iter"
 	"os"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
 
-type SymbolType int
-
-const (
-	FuncType SymbolType = iota
-	NonFuncType
-)
-
 type Symbol struct {
 	Addr   uint64
-	Type   SymbolType
 	Name   string
 	Module string
+	isDup  bool
 }
 
 func fsType(path string) (int64, error) {
@@ -43,7 +36,7 @@ func fsType(path string) (int64, error) {
 	return fsType, nil
 }
 
-var availKprobeSymbol = sync.OnceValue[map[Symbol]struct{}](func() map[Symbol]struct{} {
+func availKprobeSymbols() map[Symbol]struct{} {
 
 	var path string
 	for _, p := range []struct {
@@ -67,16 +60,16 @@ var availKprobeSymbol = sync.OnceValue[map[Symbol]struct{}](func() map[Symbol]st
 	}
 	scanner := bufio.NewScanner(bytes.NewBuffer(b))
 	for scanner.Scan() {
-		s := strings.Fields(scanner.Text())
-		if strings.HasPrefix(s[0], "__ftrace_invalid_address___") {
+		b := bytes.Fields(scanner.Bytes())
+		if bytes.HasPrefix(b[0], []byte("__ftrace_invalid_address___")) {
 			continue
 		}
 		m := ""
-		if len(s) == 2 {
-			m = strings.Trim(s[1], "[]")
+		if len(b) == 2 {
+			m = string(bytes.Trim(b[1], "[]"))
 		}
 		symbol := Symbol{
-			Name:   s[0],
+			Name:   string(b[0]),
 			Module: m,
 		}
 		syms[symbol] = struct{}{}
@@ -85,109 +78,122 @@ var availKprobeSymbol = sync.OnceValue[map[Symbol]struct{}](func() map[Symbol]st
 		return syms
 	}
 	return syms
-})
-
-type KSymCache struct {
-	syms  []Symbol
-	cache map[uint64]Symbol
-	dups  map[string]int
 }
 
-var kcache *KSymCache
-
-func NewKSymCache() (*KSymCache, error) {
-	if kcache != nil {
-		return kcache, nil
-	}
-	k := &KSymCache{
-		syms:  []Symbol{},
-		cache: make(map[uint64]Symbol),
-		dups:  make(map[string]int),
-	}
-	b, err := os.ReadFile("/proc/kallsyms")
+var getKallSyms = sync.OnceValues(func() ([]Symbol, error) {
+	f, err := os.Open("/proc/kallsyms")
 	if err != nil {
-		return k, err
+		return []Symbol{}, err
 	}
-	scanner := bufio.NewScanner(bytes.NewBuffer(b))
-	for scanner.Scan() {
-		s := strings.Fields(scanner.Text())
+	defer f.Close()
 
-		addr, err := strconv.ParseUint(s[0], 16, 64)
-		if err != nil {
-			return k, err
+	syms := []Symbol{}
+	idx := 0
+
+	type cmp struct {
+		name   string
+		module string
+	}
+	dup := make(map[cmp][]int)
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		bs := bytes.Fields(scanner.Bytes())
+		if bs[1][0] != 't' && bs[1][0] != 'T' {
+			continue
 		}
-		t := FuncType
-		if s[1] != "t" && s[1] != "T" {
-			t = NonFuncType
-		}
+
+		addr := convertAddr(bs[0])
+		name := string(bs[2])
 		m := ""
-		if len(s) == 4 {
-			m = strings.Trim(s[3], "[]")
+		if len(bs) == 4 {
+			m = string(bytes.Trim(bs[3], "[]"))
 		}
+
 		sym := Symbol{
 			Addr:   addr,
-			Type:   t,
-			Name:   s[2],
+			Name:   name,
 			Module: m,
 		}
-		k.syms = append(k.syms, sym)
-		k.dups[sym.Module+sym.Name]++
+
+		syms = append(syms, sym)
+		c := cmp{
+			name:   sym.Name,
+			module: sym.Module,
+		}
+		dup[c] = append(dup[c], idx)
+		idx++
 	}
 	if err := scanner.Err(); err != nil {
-		return k, err
-	}
-	sort.Slice(k.syms, func(i, j int) bool {
-		return k.syms[i].Addr < k.syms[j].Addr
-	})
-	kcache = k
-	return kcache, nil
-}
-
-func (k *KSymCache) SymbolByAddr(addr uint64) Symbol {
-
-	if s, ok := k.cache[addr]; ok {
-		return s
+		return syms, err
 	}
 
-	idx := sort.Search(len(k.syms), func(i int) bool {
-		return k.syms[i].Addr >= addr
-	})
-	if idx == 0 {
-		k.cache[addr] = Symbol{}
-		return k.cache[addr]
-	}
-	if idx < len(k.syms) && k.syms[idx].Addr == addr {
-		k.cache[addr] = k.syms[idx]
-		return k.cache[addr]
-	}
-	k.cache[addr] = k.syms[idx-1]
-	return k.cache[addr]
-}
-
-func (k *KSymCache) Iterate() *SymsIterator {
-	return &SymsIterator{k: k}
-}
-
-type SymsIterator struct {
-	k     *KSymCache
-	index int
-	Symbol
-}
-
-func (iter *SymsIterator) Next() bool {
-	for iter.index < len(iter.k.syms) {
-		sym := iter.k.syms[iter.index]
-		if iter.k.dups[sym.Module+sym.Name] <= 1 {
-			break
-		} else {
-			iter.index++
+	for _, idxs := range dup {
+		if len(idxs) > 1 {
+			for i := range idxs {
+				syms[i].isDup = true
+			}
 		}
 	}
 
-	if iter.index >= len(iter.k.syms) {
-		return false
+	sort.Slice(syms, func(i, j int) bool {
+		return syms[i].Addr < syms[j].Addr
+	})
+	return syms, err
+})
+
+var symCache = map[uint64]Symbol{}
+
+func SymbolByAddr(addr uint64) (Symbol, error) {
+
+	if s, ok := symCache[addr]; ok {
+		return s, nil
 	}
-	iter.Symbol = iter.k.syms[iter.index]
-	iter.index++
-	return true
+	syms, err := getKallSyms()
+	if err != nil {
+		return Symbol{}, err
+	}
+	idx := sort.Search(len(syms), func(i int) bool {
+		return syms[i].Addr >= addr
+	})
+
+	if idx < len(syms) && syms[idx].Addr == addr {
+		symCache[addr] = syms[idx]
+		return symCache[addr], nil
+	}
+	if idx == 0 {
+		return Symbol{}, errors.New("no found sym")
+	}
+	symCache[addr] = syms[idx-1]
+	return symCache[addr], nil
+}
+
+func AllKSyms() iter.Seq[Symbol] {
+	return func(yield func(Symbol) bool) {
+		if syms, err := getKallSyms(); err == nil {
+			for _, sym := range syms {
+				if sym.isDup {
+					continue
+				}
+				if !yield(sym) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func convertAddr(b []byte) uint64 {
+	v := uint64(0)
+	for _, c := range b {
+		delta := c - '0'
+		if c >= 'a' && c <= 'f' {
+			delta = c - 'a' + 10
+		}
+		if c >= 'A' && c <= 'F' {
+			delta = c - 'A' + 10
+		}
+		v = (v << 4) + uint64(delta)
+	}
+	return v
 }

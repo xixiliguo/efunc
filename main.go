@@ -195,7 +195,7 @@ ENVIRONMENT:
 					},
 					&cli.UintFlag{
 						Name:  "max-ringbuf-size",
-						Value: 1024 * 1024 * 16,
+						Value: 1024 * 1024 * 1,
 						Usage: "maximum `SIZE` of ringbuffer in bytes",
 						Action: func(ctx *cli.Context, u uint) error {
 							if u == 0 {

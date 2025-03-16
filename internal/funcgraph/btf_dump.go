@@ -16,7 +16,6 @@ type dumpOption struct {
 	isStr          bool
 	level          int
 	showZero       bool
-	ksyms          *KSymCache
 	buf            *bytes.Buffer
 	spaceCache     [1024]byte
 	typStringCache map[btf.Type]string
@@ -25,10 +24,6 @@ type dumpOption struct {
 }
 
 func NewDumpOption() (*dumpOption, error) {
-	k, err := NewKSymCache()
-	if err != nil {
-		return nil, err
-	}
 	isShow := false
 	if v := os.Getenv("BTF_SHOW_ZERO"); v == "1" {
 		isShow = true
@@ -38,7 +33,6 @@ func NewDumpOption() (*dumpOption, error) {
 		isStr:          false,
 		level:          0,
 		showZero:       isShow,
-		ksyms:          k,
 		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
 		typStringCache: make(map[btf.Type]string),
 		typSizeCache:   make(map[btf.Type]int),
@@ -321,7 +315,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		}
 		opt.WriteStrings("0x", toString(msg))
 		if p != 0 && !opt.compact {
-			if sym := opt.ksyms.SymbolByAddr(p); sym.Addr == p {
+			if sym, err := SymbolByAddr(p); err == nil && sym.Addr == p {
 				opt.WriteStrings(" <", sym.Name, ">")
 			}
 		}

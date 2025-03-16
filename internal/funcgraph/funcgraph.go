@@ -136,7 +136,6 @@ type FuncGraph struct {
 	allow_comm_cnt    uint32
 	deny_comm_cnt     uint32
 	comms             map[[16]uint8]bool
-	ksyms             *KSymCache
 	haveKprobeMulti   bool
 	haveGetFuncIP     bool
 	kretOffset        uint64
@@ -333,20 +332,13 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 		opt.AllowPids = append(opt.AllowPids, fg.targetCmd.Process.Pid)
 	}
 
-	ksyms, err := NewKSymCache()
-	if err != nil {
-		return err
-	}
-	fg.ksyms = ksyms
-
 	entryCnt := 0
 	allowedCnt := 0
 	dup := map[string]struct{}{}
+	kprobeSyms := availKprobeSymbols()
 
-	iter := ksyms.Iterate()
-	for iter.Next() {
-		sym := iter.Symbol
-		if _, ok := availKprobeSymbol()[Symbol{
+	for sym := range AllKSyms() {
+		if _, ok := kprobeSyms[Symbol{
 			Name:   sym.Name,
 			Module: sym.Module,
 		}]; !ok {
@@ -757,7 +749,6 @@ func (fg *FuncGraph) Run() error {
 		opts := link.KprobeMultiOptions{
 			Addresses: addrs,
 		}
-
 		kpMulti, err := link.KprobeMulti(fg.objs.Funcentry, opts)
 		if err != nil {
 			return fmt.Errorf("opening kprobe-multi: %w", err)
@@ -994,7 +985,11 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 		if addr == 0 {
 			break
 		}
-		sym := fg.ksyms.SymbolByAddr(addr)
+		sym, err := SymbolByAddr(addr)
+		if err != nil {
+			fg.buf.WriteString(err.Error())
+			fg.buf.WriteString("\n")
+		}
 		mod := ""
 		if sym.Module != "" {
 			mod = "[" + sym.Module + "]"
@@ -1044,8 +1039,9 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 
 		funcInfo := fg.idToFuncs[btf.TypeID(e.Id)]
 		if e.Id == 0 {
-			sym := fg.ksyms.SymbolByAddr(e.Ip)
-			funcInfo.Symbol = sym
+			if sym, err := SymbolByAddr(e.Ip); err == nil {
+				funcInfo.Symbol = sym
+			}
 		}
 		sym := funcInfo.Symbol
 		prevSeqId = e.SeqId
