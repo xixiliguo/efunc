@@ -359,83 +359,30 @@ static __always_inline void print_entry_event(struct func_event *e) {
     return;
 }
 
-#ifdef __TARGET_ARCH_x86
+
+#define cond_para(n)   \
+        {case (n-1):   \
+            data = PT_REGS_PARM##n(ctx); \
+            barrier_var(ctx);   \
+            break; \
+        }
+
 static __always_inline u64 get_arg_reg_value(struct pt_regs *ctx, u32 arg_idx) {
-    u64 data;
+    u64 data = 0;
     switch (arg_idx) {
-        case 0:
-            data = PT_REGS_PARM1(ctx);
-            barrier_var(ctx);
-            break;
-        case 1:
-            data = PT_REGS_PARM2(ctx);
-            barrier_var(ctx);
-            break;
-        case 2:
-            data = PT_REGS_PARM3(ctx);
-            barrier_var(ctx);
-            break;
-        case 3:
-            data = PT_REGS_PARM4(ctx);
-            barrier_var(ctx);
-            break;
-        case 4:
-            data = PT_REGS_PARM5(ctx);
-            barrier_var(ctx);
-            break;
-        case 5:
-            data = PT_REGS_PARM6(ctx);
-            barrier_var(ctx);
-            break;
-        default:
-            data = 0;
-            break;
+        cond_para(1)
+        cond_para(2)
+        cond_para(3)
+        cond_para(4)
+        cond_para(5)
+        cond_para(6)
+        #ifndef __TARGET_ARCH_x86
+        cond_para(7)
+        cond_para(8)
+        #endif
     }
     return data;
 }
-#else /* !__TARGET_ARCH_x86 */
-static __always_inline u64 get_arg_reg_value(struct pt_regs *ctx, u32 arg_idx) {
-    u64 data;
-    switch (arg_idx) {
-        case 0:
-            data = PT_REGS_PARM1(ctx);
-            barrier_var(ctx);
-            break;
-        case 1:
-            data = PT_REGS_PARM2(ctx);
-            barrier_var(ctx);
-            break;
-        case 2:
-            data = PT_REGS_PARM3(ctx);
-            barrier_var(ctx);
-            break;
-        case 3:
-            data = PT_REGS_PARM4(ctx);
-            barrier_var(ctx);
-            break;
-        case 4:
-            data = PT_REGS_PARM5(ctx);
-            barrier_var(ctx);
-            break;
-        case 5:
-            data = PT_REGS_PARM6(ctx);
-            barrier_var(ctx);
-            break;
-        case 6:
-            data = PT_REGS_PARM7(ctx);
-            barrier_var(ctx);
-            break;
-        case 7:
-            data = PT_REGS_PARM8(ctx);
-            barrier_var(ctx);
-            break;
-        default:
-            data = 0;
-            break;
-    }
-    return data;
-}
-#endif
 
 static __always_inline u64 get_stack_pointer(struct pt_regs *ctx)
 {
