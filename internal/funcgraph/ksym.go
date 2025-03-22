@@ -13,6 +13,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var ErrNotFoundKsym = errors.New("no found sym")
+
 type Symbol struct {
 	Addr   uint64
 	Name   string
@@ -162,7 +164,7 @@ func SymbolByAddr(addr uint64) (Symbol, error) {
 		return symCache[addr], nil
 	}
 	if idx == 0 {
-		return Symbol{}, errors.New("no found sym")
+		return Symbol{}, ErrNotFoundKsym
 	}
 	symCache[addr] = syms[idx-1]
 	return symCache[addr], nil
