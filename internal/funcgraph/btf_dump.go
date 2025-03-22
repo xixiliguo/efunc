@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"sync"
 	"unsafe"
 
 	"github.com/cilium/ebpf/btf"
@@ -355,47 +354,6 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 	}
 	return sz
 }
-
-var specCache = make(map[string]*btf.Spec)
-var baseSpec = sync.OnceValues[*btf.Spec, error](func() (*btf.Spec, error) {
-	return btf.LoadKernelSpec()
-})
-
-func LoadbtfSpec(mod string) (*btf.Spec, error) {
-
-	if mod == "" || mod == "vmlinux" {
-		return baseSpec()
-	}
-
-	if spec, ok := specCache[mod]; ok {
-		return spec, nil
-	}
-
-	h, err := btf.FindHandle(func(info *btf.HandleInfo) bool {
-		return info.Name == mod
-	})
-	if err != nil {
-		return nil, err
-	}
-	base, err := baseSpec()
-	if err != nil {
-		return nil, err
-	}
-	spec, err := h.Spec(base)
-	if err != nil {
-		return spec, err
-	}
-	specCache[mod] = spec
-	return spec, nil
-
-}
-
-// func toBytes(s string) []byte {
-// 	if len(s) == 0 {
-// 		return nil
-// 	}
-// 	return unsafe.Slice(unsafe.StringData(s), len(s))
-// }
 
 func toString(b []byte) string {
 	if len(b) == 0 {

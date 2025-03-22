@@ -40,7 +40,7 @@ ENVIRONMENT:
 					fmt.Printf("parsing %s\n", fn)
 					fmt.Printf("expr: %+v\n\n", expr)
 
-					spec, err := funcgraph.LoadbtfSpec(expr.Module)
+					spec, err := funcgraph.LoadBTFSpec(expr.Module)
 					if err != nil {
 						return err
 					}

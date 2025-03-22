@@ -299,7 +299,7 @@ func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (
 
 func (fg *FuncGraph) findBTFInfo(sym Symbol) (btf.TypeID, *btf.Func) {
 
-	spec, err := LoadbtfSpec(sym.Module)
+	spec, err := LoadBTFSpec(sym.Module)
 	if err != nil {
 		return 0, nil
 	}
@@ -740,6 +740,8 @@ func (fg *FuncGraph) Run() error {
 		fmt.Printf("will not run when run dry run mode\n")
 		return nil
 	}
+
+	FlushBTFSpec()
 
 	if fg.mode != "kprobe" && fg.haveKprobeMulti {
 		addrs := []uintptr{}

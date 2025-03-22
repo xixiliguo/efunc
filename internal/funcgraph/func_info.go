@@ -259,7 +259,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 		t.IdxOff |= writeBits(t.IdxOff, uint32(funcgraphArgAddrIMM_LEN), uint32(funcgraphArgAddrIMM_SHIFT), imm)
 		t.size = 8
 
-		spec, err := LoadbtfSpec(dataExpr.Typ.Moudle)
+		spec, err := LoadBTFSpec(dataExpr.Typ.Moudle)
 		if err != nil {
 			return fmt.Errorf("loadbtfSpec: %s", err)
 		}
@@ -290,7 +290,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 
 	if dataExpr.Typ.Name != "" {
 		if _, ok := t.typ.(*btf.Pointer); ok {
-			spec, err := LoadbtfSpec(dataExpr.Typ.Moudle)
+			spec, err := LoadBTFSpec(dataExpr.Typ.Moudle)
 			if err != nil {
 				return fmt.Errorf("loadbtfSpec: %s", err)
 			}
