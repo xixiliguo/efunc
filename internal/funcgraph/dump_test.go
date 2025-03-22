@@ -18,32 +18,33 @@ var rawData = []byte{
 	5, 65, 101, 138, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0,
 }
 
-func BenchmarkDumpDataByBTF(b *testing.B) {
+func mustNewOpt(tb testing.TB) *dumpOption {
+	tb.Helper()
 	opt, err := NewDumpOption()
 	if err != nil {
-		b.Fatalf("%s", err)
+		tb.Fatalf("%s", err)
 	}
-	opt.Reset(rawData, false, 0, false)
+	return opt
+}
 
+func mustTypeByName(tb testing.TB, name string, typ **btf.Struct) {
+	tb.Helper()
 	spec, err := btf.LoadKernelSpec()
 	if err != nil {
-		b.Fatalf("%s", err)
+		tb.Fatalf("%s", err)
 	}
+	err = spec.TypeByName(name, typ)
+	if err != nil {
+		tb.Fatalf("%s", err)
+	}
+}
+
+func BenchmarkDumpDataByBTF(b *testing.B) {
+	opt := mustNewOpt(b)
 	name := "file"
 	var typ *btf.Struct
-	iter := spec.Iterate()
-	for iter.Next() {
-		if s, ok := iter.Type.(*btf.Struct); ok {
-			if s.Name == name {
-				typ = s
-			}
-		}
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for n := 0; n < b.N; n++ {
+	mustTypeByName(b, name, &typ)
+	for b.Loop() {
 		opt.Reset(rawData, false, 0, false)
 		opt.dumpDataByBTF(name, typ, 0, 0, 0)
 	}

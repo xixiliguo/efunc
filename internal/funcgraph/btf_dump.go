@@ -2,9 +2,12 @@ package funcgraph
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/cilium/ebpf/btf"
@@ -82,6 +85,33 @@ func (opt *dumpOption) WriteStrings(ss ...string) {
 	}
 }
 
+func (opt *dumpOption) appendComment(name string, typ btf.Type, offset, bitOff, bitSize int) {
+
+	if def, ok := typ.(*btf.Typedef); ok && strings.HasPrefix(def.Name, "__be") {
+		msg := make([]byte, 0, 16)
+		i := uint64(0)
+		if def.Name == "__be16" {
+			if name == "source" || name == "dest" {
+				i = uint64(binary.BigEndian.Uint16(opt.data[offset:]))
+				msg = strconv.AppendUint(msg, i, 10)
+				opt.WriteStrings("    /* ", "port", " ", toString(msg), " */")
+				return
+			}
+		} else if def.Name == "__be32" {
+			if name == "saddr" || name == "daddr" {
+				if ip, ok := netip.AddrFromSlice(opt.data[offset : offset+4]); ok {
+					if msg, err := ip.AppendText(msg); err == nil {
+						opt.WriteStrings("    /* ", "ip", " ", toString(msg), " */")
+					} else {
+						opt.WriteStrings("    /* ", "error", " ", err.Error(), " */")
+					}
+				}
+				return
+			}
+		}
+	}
+}
+
 func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, bitSize int) int {
 
 	level := opt.level
@@ -132,8 +162,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		return sz
 	}
 
-	typ = btf.UnderlyingType(typ)
-	switch t := typ.(type) {
+	switch t := btf.UnderlyingType(typ).(type) {
 	case *btf.Union:
 		opt.WriteStrings(space, name, connector)
 		if !opt.compact {
@@ -352,6 +381,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		typ := fmt.Sprintf("%v", t)
 		opt.WriteStrings(space, name, connector, "don't know how to print ", typ)
 	}
+	opt.appendComment(name, typ, offset, bitOff, bitSize)
 	return sz
 }
 
