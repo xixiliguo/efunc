@@ -279,7 +279,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 		}
 		t.size = sz
 		btfData = pointer
-		dataExpr.Typ.Name = ""
+		// dataExpr.Typ.Name = ""
 	}
 
 	// fmt.Println(dataExpr.First, btfData)
@@ -288,7 +288,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 		return fmt.Errorf("parsing %s %q: %w", f, dataExpr, err)
 	}
 
-	if dataExpr.Typ.Name != "" {
+	if dataExpr.Typ.Name != "" && t.argKind != ADDR {
 		if _, ok := t.typ.(*btf.Pointer); ok {
 			spec, err := LoadBTFSpec(dataExpr.Typ.Moudle)
 			if err != nil {
@@ -352,6 +352,9 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 				return fmt.Errorf("parsing %s %q: %s fail to get string: %s", f, dataExpr, threshold, err)
 			}
 		} else {
+			if t.CmpOperator >= 7 {
+				return fmt.Errorf("parsing %s %q: do not support \"~\" or \"!~\" opeartor", f, dataExpr)
+			}
 			switch typ := btf.UnderlyingType(t.typ).(type) {
 			case *btf.Int:
 				if typ.Encoding == btf.Signed {

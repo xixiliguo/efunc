@@ -48,6 +48,9 @@ func (d DataExpr) String() string {
 	}
 	for _, f := range d.Fields {
 		re += "->" + f.Name
+		if n, err := f.Index.ShowSignNumber(); err == nil {
+			re += fmt.Sprintf("[%d]", n)
+		}
 	}
 	if d.ShowString {
 		re += ":str"
