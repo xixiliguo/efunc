@@ -682,6 +682,18 @@ func (fg *FuncGraph) load() error {
 
 	fmt.Printf("max trace size is %d bytes, max trace event size is %d bytes\n", fg.maxTraceSize, maxAllTraceSize)
 	consts["max_trace_data"] = fg.maxTraceSize
+	var d *btf.Struct
+	if err := spec.Types.TypeByName("data", &d); err == nil {
+		for _, m := range d.Members {
+			if m.Name == "d" {
+				c := m.Type.(*btf.Array)
+				c.Nelems = fg.maxTraceSize
+				d.Size = fg.maxTraceSize
+			}
+		}
+	} else {
+		return err
+	}
 	consts["max_trace_buf"] = maxAllTraceSize
 	fg.maxTraceEventSize = maxAllTraceSize
 	fg.dataPool = sync.Pool{

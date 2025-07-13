@@ -110,6 +110,14 @@ struct trace_data {
     char target_str[16];
 };
 
+struct target_data {
+    char d[16];
+};
+
+struct data {
+    char d[1024];
+};
+
 struct func_basic {
     u32 id;
     bool is_main_entry;
@@ -549,83 +557,74 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
     }
 }
 
-struct str_contains_ctx {
-    char *dst;
-	u32 dst_start;
-    char *target;
-    u32 flags;
-    long result;
-};
+long __noinline  ___str_contains(struct data *dst, u32 index, struct target_data *target, u32 flags, bool *can_loop) {
 
-
-static long str_callback(u64 index, void *_ctx) {
-	struct str_contains_ctx *ctx = (struct str_contains_ctx *)_ctx;
-	if (index >= MAX_TARGET_LEN) {
-		return 1;
-	}
-    if (ctx->target[index] == 0 && ctx->flags == 0) {
-        return 1;
+    long result = 1;
+    if (dst == NULL || target == NULL || can_loop == NULL) {
+        return result;
     }
-
-	u32 offset = ctx->dst_start + index;
-	if (offset >= max_trace_data) {
-        return 1;
+    char *d = (char *)dst;
+    char *t = (char *)target;
+    if (index >=max_trace_data) {
+        *can_loop = false;
+        return result;
     }
-	ctx->result = ctx->dst[offset] - ctx->target[index];
-	if (ctx->result) {
-		return 1;
-	}
-	return 0;
+    if (d[index] == 0) {
+        *can_loop = false;
+        return result;
+    }
+    bool last = false;
+    for (u32 i =0; i < MAX_TARGET_LEN && !last; i++) {
+        if (t[i] == 0) {
+            if (flags == 0) {
+                break;
+            } else {
+                last = true;
+            }
+        }
+        u32 offset = index + i;
+        if (offset >= max_trace_data) {
+            break;
+        }
+        barrier_var(i);
+        result = d[offset] - t[i];
+        if (result) {
+            break;
+        }
+    }
+    if (result == 0 || flags == 1) {
+        *can_loop = false;
+    }
+    return result;
 }
 
 
-static long str_contains_callback(u64 index, void *_ctx) {
-    struct str_contains_ctx *ctx = (struct str_contains_ctx *)_ctx;
-	
-    if (index >= max_trace_data) {
-        return 1;
-    }
-    if (ctx->dst[index] == 0) {
-        return 1;
-    }
-	ctx->dst_start = index;
 
-	bpf_loop(MAX_TARGET_LEN, str_callback, ctx, 0);
-	if (ctx->result == 0 || ctx->flags == 1) {
-        return 1;
-    }
-	return 0;
-}
-
-
-static __always_inline long __str_contains(void *dst, char *target, u32 flags) {
+long __noinline  __str_contains(struct data *dst, struct target_data *target, u32 flags) {
     
-    struct str_contains_ctx ctx = {dst, 0, target, flags, 1};
-	bpf_loop(max_trace_data, str_contains_callback, &ctx, 0);
-    // bpf_printk("%s %s --> %d %d", dst, target, ctx.dst_start, ctx.result);
-    return ctx.result;
-}
-
-struct trace_allowed_ctx {
-    struct trace_data *tp;
-    struct event_data *buf;
-    u8 cmp_cnt;
-    u8 cmp_cnt_allowed;
-};
-
-
-static long trace_allowed_callback(u64 index, void *_ctx)
-{
-    struct trace_allowed_ctx *ctx = (struct trace_allowed_ctx *)_ctx;
-    u64 src_unsign_data = 0;
-    s64 src_sign_data = 0;
-    if (index >= MAX_TRACES) {
+    if (dst == NULL || target == NULL) {
         return 1;
     }
-    struct trace_data *t = ctx->tp + index;
-    if (t->size == 0) {
+ 
+    long result = 1;
+    bool can_loop = true;
+    for (int i =0; i < max_trace_data && can_loop; i++) {
+        result = ___str_contains(dst, i, target, flags, &can_loop);
+    }
+    return result;
+}
+
+
+u8 trace_allowed(struct trace_data *t,  struct data *dst)
+{
+    if (t == NULL) {
         return 0;
     }
+    if (dst == NULL) {
+        return 0;
+    }
+    u64 src_unsign_data = 0;
+    s64 src_sign_data = 0;
     u16 sz = t->size;
 
     u32 bit_off, bit_size;
@@ -635,18 +634,6 @@ static long trace_allowed_callback(u64 index, void *_ctx)
     bool is_str = t->flags & DATA_STR;
     bool is_sign = t->flags & DATA_SIGN;
     bool is_char_array = t->flags & DATA_CHAR_ARRAY;
-
-    if (t->cmp_operator == CMP_NOP) {
-        return 0;
-    }
-
-    if (ctx->buf->data_off[index] < 0) {
-        return 1;
-    }
-    if (ctx->buf->data_off[index] >= max_trace_buf) {
-        return 1;
-    }
-    void *dst = ctx->buf->data + ctx->buf->data_off[index];
 
     if (sz == 1) {
         src_unsign_data = *(u8 *)dst;
@@ -671,25 +658,25 @@ static long trace_allowed_callback(u64 index, void *_ctx)
         src_unsign_data = (src_unsign_data << (u64)left) >> (u64)right;
     }
 
-    ctx->cmp_cnt++;
+    u8 cmp_cnt_allowed = 0;
 
     if (is_str || is_char_array) {
         u32 flags = 1;
         if (t->cmp_operator == CMP_GLOB || t->cmp_operator == CMP_NOTGLOB) {
             flags = 0;
         }
-        int re = __str_contains(dst, t->target_str, flags);
+        int re = __str_contains(dst, (void *)t->target_str, flags);
         switch (t->cmp_operator) {
             case CMP_EQ:
             case CMP_GLOB:
                 if (re == 0) {
-                    ctx->cmp_cnt_allowed++;
+                    cmp_cnt_allowed++;
                 }
                 break;
             case CMP_NOTEQ:
             case CMP_NOTGLOB:
                 if (re != 0) {
-                    ctx->cmp_cnt_allowed++;
+                    cmp_cnt_allowed++;
                 }
                 break;
         }
@@ -698,42 +685,42 @@ static long trace_allowed_callback(u64 index, void *_ctx)
             case CMP_EQ:
                 if ((!is_sign && src_unsign_data == t->target) ||
                     (is_sign && src_sign_data == (s64)t->target)) {
-                    ctx->cmp_cnt_allowed++;
+                    cmp_cnt_allowed++;
                 }
                 break;
             case CMP_NOTEQ:
                 if ((!is_sign && src_unsign_data != t->target) ||
                     (is_sign && src_sign_data != (s64)t->target)) {
-                    ctx->cmp_cnt_allowed++;
+                    cmp_cnt_allowed++;
                 }
                 break;
             case CMP_GT:
                 if ((!is_sign && src_unsign_data > t->target) ||
                     (is_sign && src_sign_data > (s64)t->target)) {
-                    ctx->cmp_cnt_allowed++;
+                    cmp_cnt_allowed++;
                 }
                 break;
             case CMP_GE:
                 if ((!is_sign && src_unsign_data >= t->target) ||
                     (is_sign && src_sign_data >= (s64)t->target)) {
-                    ctx->cmp_cnt_allowed++;
+                    cmp_cnt_allowed++;
                 }
                 break;
             case CMP_LT:
                 if ((!is_sign && src_unsign_data < t->target) ||
                     (is_sign && src_sign_data < (s64)t->target)) {
-                        ctx->cmp_cnt_allowed++;
+                        cmp_cnt_allowed++;
                 }
                 break;
             case CMP_LE:
                 if ((!is_sign && src_unsign_data <= t->target) ||
                     (is_sign && src_sign_data <= (s64)t->target)) {
-                        ctx->cmp_cnt_allowed++;
+                        cmp_cnt_allowed++;
                 }
                 break;
         }
     }
-    return 0;
+    return cmp_cnt_allowed;
 }
 
 
@@ -744,11 +731,27 @@ static __always_inline bool trace_data_allowed(struct event_data *buf, struct fu
     if (ret) {
         tp = fn->ret_trace;
     }
-
-    struct trace_allowed_ctx ctx = {tp, buf, 0, 0};
-	bpf_loop(MAX_TRACES, trace_allowed_callback, &ctx, 0);
-
-    return ctx.cmp_cnt == ctx.cmp_cnt_allowed;
+    u8 cmp_cnt = 0;
+    u8 cnt_allowed = 0 ;
+    for (int index = 0 ; index < MAX_TRACES; index++) {
+        struct trace_data *t = tp + index;
+        if (t->size == 0) {
+            continue;
+        }
+        if (t->cmp_operator == CMP_NOP) {
+            continue;
+        }
+        if (buf->data_off[index] < 0) {
+            break;
+        }
+        if (buf->data_off[index] >= max_trace_buf) {
+            break;
+        }
+        void *dst = buf->data + buf->data_off[index];
+        cmp_cnt++;
+        cnt_allowed += trace_allowed(t, dst);
+    }
+    return cmp_cnt == cnt_allowed;
 }
 
 static __always_inline void extract_func_paras(struct func_event *e,
