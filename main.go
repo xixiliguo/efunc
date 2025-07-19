@@ -23,6 +23,7 @@ EXAMPLES:
 
 ENVIRONMENT:
 	BTF_SHOW_ZERO		[default: 0] show field info even value is zero
+	MAX_STRING_SIZE		[default: 64] max size if traced data render as string 
 	`, cli.AppHelpTemplate)
 	app := &cli.App{
 		Usage:   "A eBPF-based trace tool like ftrace funcgraph",

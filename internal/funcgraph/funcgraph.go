@@ -562,6 +562,7 @@ func (fg *FuncGraph) load() error {
 	}
 	commSpec.MaxEntries = uint32(len(commSpec.Contents) + 1)
 
+	maxTraceDataSize := uint32(0)
 	maxAllTraceSize := uint32(0)
 	basicSpec := spec.Maps["func_basic_info"]
 	fnSpec := spec.Maps["func_info"]
@@ -606,7 +607,9 @@ func (fg *FuncGraph) load() error {
 				fmt.Printf("func %s %s: size %d exceed %d\n", fn.String(), t.name, t.size, fg.maxTraceSize)
 			}
 
-			entryTraceSize += (min(fg.maxTraceSize, uint32(t.size)) + 7) / 8 * 8
+			traceDataSize := (min(fg.maxTraceSize, uint32(t.size)) + 7) / 8 * 8
+			maxTraceDataSize = max(maxTraceDataSize, traceDataSize)
+			entryTraceSize += traceDataSize
 
 			if len(t.TargetStr) != 0 {
 				strCnt := 0
@@ -642,7 +645,10 @@ func (fg *FuncGraph) load() error {
 			if uint32(t.size) > fg.maxTraceSize {
 				fmt.Printf("func %s %s: size %d exceed %d\n", fn.String(), t.name, t.size, fg.maxTraceSize)
 			}
-			retTraceSize += (min(fg.maxTraceSize, uint32(t.size)) + 7) / 8 * 8
+
+			traceDataSize := (min(fg.maxTraceSize, uint32(t.size)) + 7) / 8 * 8
+			maxTraceDataSize = max(maxTraceDataSize, traceDataSize)
+			retTraceSize += traceDataSize
 
 			if len(t.TargetStr) != 0 {
 				strCnt := 0
@@ -661,7 +667,7 @@ func (fg *FuncGraph) load() error {
 			}
 		}
 
-		maxAllTraceSize += max(entryTraceSize, retTraceSize)
+		maxAllTraceSize = max(maxAllTraceSize, entryTraceSize, retTraceSize)
 		fnSpec.Contents = append(fnSpec.Contents, ebpf.MapKV{Key: fn.Addr, Value: f})
 	}
 	basicSpec.MaxEntries = uint32(len(basicSpec.Contents) + 1)
@@ -680,15 +686,15 @@ func (fg *FuncGraph) load() error {
 	consts["duration_ms"] = fg.duration
 	consts["max_depth"] = uint8(fg.depth)
 
-	fmt.Printf("max trace size is %d bytes, max trace event size is %d bytes\n", fg.maxTraceSize, maxAllTraceSize)
-	consts["max_trace_data"] = fg.maxTraceSize
+	fmt.Printf("max trace data is %d bytes, max trace buffer is %d bytes\n", maxTraceDataSize, maxAllTraceSize)
+	consts["max_trace_data"] = maxTraceDataSize
 	var d *btf.Struct
 	if err := spec.Types.TypeByName("data", &d); err == nil {
 		for _, m := range d.Members {
 			if m.Name == "d" {
 				c := m.Type.(*btf.Array)
-				c.Nelems = fg.maxTraceSize
-				d.Size = fg.maxTraceSize
+				c.Nelems = maxTraceDataSize
+				d.Size = maxTraceDataSize
 			}
 		}
 	} else {

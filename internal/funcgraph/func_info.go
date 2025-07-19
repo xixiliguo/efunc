@@ -3,6 +3,8 @@ package funcgraph
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -330,7 +332,10 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 
 	if dataExpr.ShowString {
 		t.isStr = true
-		t.size = 1024
+		t.size = 64
+		if s, err := strconv.Atoi(os.Getenv("MAX_STRING_SIZE")); err == nil && s > 0 {
+			t.size = s
+		}
 	}
 
 	if arrTyp, ok := t.typ.(*btf.Array); ok {
