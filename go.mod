@@ -4,10 +4,10 @@ go 1.24
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.1
-	github.com/cilium/ebpf v0.17.1
+	github.com/cilium/ebpf v0.19.0
 	github.com/google/go-cmp v0.6.0
 	github.com/urfave/cli/v2 v2.27.1
-	golang.org/x/sys v0.28.0
+	golang.org/x/sys v0.31.0
 )
 
 require (
