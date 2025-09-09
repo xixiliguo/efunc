@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 fake nanosleep.bpf.c -- -I../include
+//go:generate go tool bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 fake nanosleep.bpf.c -- -I../include
 
 func DetectRetOffset() (uint64, error) {
 	fakeObjs := fakeObjects{}

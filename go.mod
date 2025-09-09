@@ -1,6 +1,6 @@
 module github.com/xixiliguo/efunc
 
-go 1.24
+go 1.25
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.1
@@ -15,3 +15,5 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20231213231151-1d8dd44e695e // indirect
 )
+
+tool github.com/cilium/ebpf/cmd/bpf2go

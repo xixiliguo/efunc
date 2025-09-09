@@ -27,7 +27,7 @@ import (
 	"github.com/xixiliguo/efunc/internal/sysinfo"
 )
 
-//go:generate bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 -type start_event -type func_event -type trace_data -type arg_kind -type arg_addr -type trace_data_flags -type event_data -type trace_constant funcgraph funcgraph.bpf.c -- -I../include
+//go:generate go tool bpf2go -cc clang -cflags $BPF_CFLAGS -target amd64,arm64 -type start_event -type func_event -type trace_data -type arg_kind -type arg_addr -type trace_data_flags -type event_data -type trace_constant funcgraph funcgraph.bpf.c -- -I../include
 
 type Event uint8
 

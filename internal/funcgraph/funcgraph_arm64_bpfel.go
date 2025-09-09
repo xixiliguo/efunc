@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"structs"
 
 	"github.com/cilium/ebpf"
 )
@@ -38,6 +39,7 @@ const (
 )
 
 type funcgraphCallEvent struct {
+	_         structs.HostLayout
 	Type      uint8
 	_         [7]byte
 	Task      uint64
@@ -56,12 +58,14 @@ type funcgraphCallEvent struct {
 }
 
 type funcgraphEventData struct {
+	_       structs.HostLayout
 	DataLen uint32
 	DataOff [7]int32
 	Data    [0]uint8
 }
 
 type funcgraphFunc struct {
+	_             structs.HostLayout
 	Id            uint32
 	IsMainEntry   bool
 	Name          [40]int8
@@ -76,6 +80,7 @@ type funcgraphFunc struct {
 }
 
 type funcgraphFuncBasic struct {
+	_           structs.HostLayout
 	Id          uint32
 	IsMainEntry bool
 	Name        [40]int8
@@ -83,6 +88,7 @@ type funcgraphFuncBasic struct {
 }
 
 type funcgraphFuncEvent struct {
+	_        structs.HostLayout
 	Type     uint8
 	_        [7]byte
 	Task     uint64
@@ -100,6 +106,7 @@ type funcgraphFuncEvent struct {
 }
 
 type funcgraphStartEvent struct {
+	_    structs.HostLayout
 	Type uint8
 	_    [7]byte
 	Task uint64
@@ -115,6 +122,7 @@ const (
 )
 
 type funcgraphTraceData struct {
+	_           structs.HostLayout
 	ArgKind     funcgraphArgKind
 	ArgLoc      uint32
 	FieldCnt    uint8
