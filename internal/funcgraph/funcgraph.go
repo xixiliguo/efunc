@@ -692,9 +692,12 @@ func (fg *FuncGraph) load() error {
 	if err := spec.Types.TypeByName("data", &d); err == nil {
 		for _, m := range d.Members {
 			if m.Name == "d" {
+				// kernel 5.15 verify subprog first, so
+				// must set at least 8 bytes.
+				nums := max(8, maxTraceDataSize)
 				c := m.Type.(*btf.Array)
-				c.Nelems = maxTraceDataSize
-				d.Size = maxTraceDataSize
+				c.Nelems = nums
+				d.Size = nums
 			}
 		}
 	} else {
