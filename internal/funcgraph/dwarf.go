@@ -64,8 +64,6 @@ func FuncsFromFile(pattern string) map[Symbol]struct{} {
 	}
 
 	r := data.Reader()
-	var currIdx int
-	// var currName string
 	for {
 		cu, err := r.Next()
 		if err != nil {
@@ -77,39 +75,47 @@ func FuncsFromFile(pattern string) map[Symbol]struct{} {
 
 		if cu.Tag == dwarf.TagCompileUnit {
 			name := cu.Val(dwarf.AttrName).(string)
-			lr, _ := data.LineReader(cu)
 			if match, _ := path.Match(pattern, name); match {
+				lr, _ := data.LineReader(cu)
+				currIdx := 1
 				for idx, f := range lr.Files() {
 					if f != nil {
 						if f.Name == name {
-							// currName = name
 							currIdx = idx
+							break
 						}
 					}
 				}
-				// currCu = cu
-			} else {
-				// currCu = nil
-				r.SkipChildren()
-			}
-		}
-		if cu.Tag == dwarf.TagSubprogram && cu.Children {
-			if v, ok := cu.Val(dwarf.AttrDeclFile).(int64); ok {
-				if v == int64(currIdx) {
-					funcName, _ := cu.Val(dwarf.AttrName).(string)
-					// fmt.Printf("file: %s\n", currName)
-					// fmt.Printf("prog: %s\n", funcName)
-					// fmt.Printf("prog: %+v\n", cu)
-					s := Symbol{
-						Name:   funcName,
-						Addr:   0,
-						Module: "",
+
+				for {
+					e, err := r.Next()
+					if err != nil || e == nil || e.Tag == 0 {
+						break
 					}
-					funcs[s] = struct{}{}
+					if e.Tag == dwarf.TagSubprogram {
+						if v, ok := e.Val(dwarf.AttrDeclFile).(int64); ok {
+							if v == int64(currIdx) {
+								funcName, _ := e.Val(dwarf.AttrName).(string)
+								// fmt.Printf("file: %s\n", currName)
+								// fmt.Printf("prog: %s\n", funcName)
+								// fmt.Printf("prog: %+v\n", cu)
+								s := Symbol{
+									Name:   funcName,
+									Addr:   0,
+									Module: "",
+								}
+								funcs[s] = struct{}{}
+							}
+						}
+					}
+					if e.Children {
+						r.SkipChildren()
+					}
 				}
 			}
+			r.SkipChildren()
 		}
+
 	}
-	// fmt.Println(funcs)
 	return funcs
 }
