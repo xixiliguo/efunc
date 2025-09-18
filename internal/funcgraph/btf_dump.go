@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"net/netip"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 	"unsafe"
 
 	"github.com/cilium/ebpf/btf"
+	"golang.org/x/sys/unix"
 )
 
 type dumpOption struct {
@@ -85,30 +86,237 @@ func (opt *dumpOption) WriteStrings(ss ...string) {
 	}
 }
 
-func (opt *dumpOption) appendComment(name string, typ btf.Type, offset, bitOff, bitSize int) {
+func findOffsetFromStruct(s *btf.Struct, name string) (int, btf.Type, bool) {
 
-	if def, ok := typ.(*btf.Typedef); ok && strings.HasPrefix(def.Name, "__be") {
-		msg := make([]byte, 0, 16)
-		i := uint64(0)
-		if def.Name == "__be16" {
-			if name == "source" || name == "dest" {
-				i = uint64(binary.BigEndian.Uint16(opt.data[offset:]))
-				msg = strconv.AppendUint(msg, i, 10)
-				opt.WriteStrings("    /* ", "port", " ", toString(msg), " */")
-				return
-			}
-		} else if def.Name == "__be32" {
-			if name == "saddr" || name == "daddr" {
-				if ip, ok := netip.AddrFromSlice(opt.data[offset : offset+4]); ok {
-					if msg, err := ip.AppendText(msg); err == nil {
-						opt.WriteStrings("    /* ", "ip", " ", toString(msg), " */")
-					} else {
-						opt.WriteStrings("    /* ", "error", " ", err.Error(), " */")
-					}
+	for _, m := range s.Members {
+		if m.Name == name {
+			return int(m.Offset.Bytes()), m.Type, true
+		}
+		if m.Name == "" {
+			base := int(m.Offset.Bytes())
+			switch typ := m.Type.(type) {
+			case *btf.Struct:
+				off, childTyp, found := findOffsetFromStruct(typ, name)
+				if found {
+					return base + off, childTyp, found
 				}
-				return
+			case *btf.Union:
+				off, childTyp, found := findOffsetFromUnion(typ, name)
+				if found {
+					return base + off, childTyp, found
+				}
 			}
 		}
+	}
+	return 0, nil, false
+}
+
+func findOffsetFromUnion(s *btf.Union, name string) (int, btf.Type, bool) {
+
+	for _, m := range s.Members {
+		if m.Name == name {
+			return int(m.Offset.Bytes()), m.Type, true
+		}
+		if m.Name == "" {
+			base := int(m.Offset.Bytes())
+			switch typ := m.Type.(type) {
+			case *btf.Struct:
+				off, childTyp, found := findOffsetFromStruct(typ, name)
+				if found {
+					return base + off, childTyp, found
+				}
+			case *btf.Union:
+				off, childTyp, found := findOffsetFromUnion(typ, name)
+				if found {
+					return base + off, childTyp, found
+				}
+			}
+		}
+	}
+	return 0, nil, false
+}
+
+func findOffset(s *btf.Struct, names string) (int, bool) {
+
+	fields := strings.Split(names, ".")
+	var start btf.Type
+	start = s
+	totalOff := 0
+	for _, f := range fields {
+		switch typ := start.(type) {
+		case *btf.Struct:
+			off, childTyp, found := findOffsetFromStruct(typ, f)
+			if !found {
+				return 0, false
+			}
+			totalOff += off
+			start = childTyp
+		case *btf.Union:
+			off, childTyp, found := findOffsetFromUnion(typ, f)
+			if !found {
+				return 0, false
+			}
+			totalOff += off
+			start = childTyp
+		default:
+			return 0, false
+		}
+	}
+	return totalOff, true
+}
+
+func (opt *dumpOption) appendComment(typ *btf.Struct, offset int) {
+
+	if offset+int(typ.Size) > len(opt.data) {
+		return
+	}
+
+	if opt.compact {
+		return
+	}
+
+	space := toString(opt.spaceCache[:2*(opt.level+1)])
+
+	if typ.Name == "sock" {
+		opt.buf.WriteString(space)
+		opt.buf.WriteString("/* ")
+		if off, found := findOffset(typ, "__sk_common.skc_family"); found {
+			family := binary.NativeEndian.Uint16(opt.data[offset+off:])
+			switch family {
+			case unix.AF_UNIX:
+				opt.buf.WriteString("UNIX ")
+			case unix.AF_NETLINK:
+				opt.buf.WriteString("NETLINK ")
+			case unix.AF_PACKET:
+				opt.buf.WriteString("PACKET ")
+			case unix.AF_INET:
+				opt.buf.WriteString("IPV4 ")
+				if off, found := findOffset(typ, "sk_protocol"); found {
+					t := binary.NativeEndian.Uint16(opt.data[offset+off:])
+					switch t {
+					case unix.IPPROTO_UDP:
+						opt.buf.WriteString("UDP ")
+						offSaddr, found1 := findOffset(typ, "__sk_common.skc_rcv_saddr")
+						offSport, found2 := findOffset(typ, "__sk_common.skc_num")
+						offDaddr, found3 := findOffset(typ, "__sk_common.skc_daddr")
+						offDport, found4 := findOffset(typ, "__sk_common.skc_dport")
+						if found1 && found2 && found3 && found4 {
+							s := opt.data[offset+offSaddr:]
+							d := opt.data[offset+offDaddr:]
+							saddr := net.IPv4(s[0], s[1], s[2], s[3])
+							sport := binary.NativeEndian.Uint16(opt.data[offset+offSport:])
+							daddr := net.IPv4(d[0], d[1], d[2], d[3])
+							dport := binary.BigEndian.Uint16(opt.data[offset+offDport:])
+							fmt.Fprintf(opt.buf, " %s:%d --> %s:%d ",
+								saddr, sport,
+								daddr, dport)
+						}
+					case unix.IPPROTO_TCP:
+						opt.buf.WriteString("TCP ")
+						offSaddr, found1 := findOffset(typ, "__sk_common.skc_rcv_saddr")
+						offSport, found2 := findOffset(typ, "__sk_common.skc_num")
+						offDaddr, found3 := findOffset(typ, "__sk_common.skc_daddr")
+						offDport, found4 := findOffset(typ, "__sk_common.skc_dport")
+						if found1 && found2 && found3 && found4 {
+							s := opt.data[offset+offSaddr:]
+							d := opt.data[offset+offDaddr:]
+							saddr := net.IPv4(s[0], s[1], s[2], s[3])
+							sport := binary.NativeEndian.Uint16(opt.data[offset+offSport:])
+							daddr := net.IPv4(d[0], d[1], d[2], d[3])
+							dport := binary.BigEndian.Uint16(opt.data[offset+offDport:])
+							fmt.Fprintf(opt.buf, "LOCAL: %s:%d --> REMOTE: %s:%d ",
+								saddr, sport,
+								daddr, dport)
+						}
+					default:
+						opt.buf.WriteString("UNKNOWN PROTOCOL ")
+					}
+				}
+			case unix.AF_INET6:
+				opt.buf.WriteString("IPV6 ")
+			default:
+				opt.buf.WriteString("UNKNOWN FAMILY ")
+			}
+		}
+		opt.buf.WriteString(" */\n")
+	}
+
+	if typ.Name == "iphdr" {
+		len := binary.BigEndian.Uint16(opt.data[offset+2:])
+		id := binary.BigEndian.Uint16(opt.data[offset+4:])
+
+		prot := opt.data[offset+9]
+		p := "UNKNOWN PROTOCOL"
+		switch prot {
+		case unix.IPPROTO_ICMP:
+			p = "ICMP"
+		case unix.IPPROTO_TCP:
+			p = "TCP"
+		case unix.IPPROTO_UDP:
+			p = "UDP"
+		}
+		s := opt.data[offset+12:]
+		src := net.IPv4(s[0], s[1], s[2], s[3])
+		d := opt.data[offset+16:]
+		dst := net.IPv4(d[0], d[1], d[2], d[3])
+
+		opt.buf.WriteString(space)
+		fmt.Fprintf(opt.buf, "/* IPV4 LEN: %d ID: %d  %s  ADDR: %s --> %s */\n",
+			len, id,
+			p,
+			src, dst)
+	}
+
+	if typ.Name == "tcphdr" {
+		src := binary.BigEndian.Uint16(opt.data[offset:])
+		dst := binary.BigEndian.Uint16(opt.data[offset+2:])
+
+		seq := binary.BigEndian.Uint32(opt.data[offset+4:])
+		ack := binary.BigEndian.Uint32(opt.data[offset+8:])
+
+		flags := make([]byte, 0, 8)
+		b := opt.data[offset+13]
+		if b&1 != 0 {
+			flags = append(flags, 'F')
+		}
+		if b&2 != 0 {
+			flags = append(flags, 'S')
+		}
+		if b&4 != 0 {
+			flags = append(flags, 'R')
+		}
+		if b&8 != 0 {
+			flags = append(flags, 'P')
+		}
+		if b&16 != 0 {
+			flags = append(flags, '.')
+		}
+		opt.buf.WriteString(space)
+		fmt.Fprintf(opt.buf, "/* PORT: %d --> %d FLAGS: [%s] SEQ %d ACK %d */\n",
+			src, dst,
+			flags,
+			seq, ack)
+	}
+
+	if typ.Name == "udphdr" {
+		src := binary.BigEndian.Uint16(opt.data[offset:])
+		dst := binary.BigEndian.Uint16(opt.data[offset+2:])
+		len := binary.BigEndian.Uint16(opt.data[offset+4:])
+
+		opt.buf.WriteString(space)
+		fmt.Fprintf(opt.buf, "/* PORT: %d --> %d LEN: %d */\n",
+			src, dst, len)
+	}
+
+	if typ.Name == "icmphdr" {
+		t := opt.data[offset]
+		code := opt.data[offset+1]
+		id := binary.BigEndian.Uint16(opt.data[offset+4:])
+		sequence := binary.BigEndian.Uint16(opt.data[offset+6:])
+
+		opt.buf.WriteString(space)
+		fmt.Fprintf(opt.buf, "/* TYPE: %d CODE: %d ID: %d SEQ: %d */\n",
+			t, code, id, sequence)
 	}
 }
 
@@ -196,6 +404,9 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 			opt.WriteStrings("(", opt.typString(t), ")")
 		}
 		opt.WriteStrings("{", span)
+
+		opt.appendComment(t, offset)
+
 		sep := "\n"
 		if opt.compact {
 			sep = ","
@@ -381,7 +592,6 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		typ := fmt.Sprintf("%v", t)
 		opt.WriteStrings(space, name, connector, "don't know how to print ", typ)
 	}
-	opt.appendComment(name, typ, offset, bitOff, bitSize)
 	return sz
 }
 
