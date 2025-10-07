@@ -101,7 +101,6 @@ func FuncsFromFile(pattern string) map[Symbol]struct{} {
 								// fmt.Printf("prog: %+v\n", cu)
 								s := Symbol{
 									Name:   funcName,
-									Addr:   0,
 									Module: "",
 								}
 								funcs[s] = struct{}{}

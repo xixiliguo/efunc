@@ -156,6 +156,7 @@ type FuncGraph struct {
 	inheritChild      bool
 	duration          uint64
 	depth             uint64
+	ksym              *KernelSymbolizer
 }
 
 func NewFuncGraph(opt *Option) (*FuncGraph, error) {
@@ -183,6 +184,11 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 	for i := 0; i < len(fg.spaceCache); i++ {
 		fg.spaceCache[i] = ' '
 	}
+	if ksym, err := NewKsymbolizer(); err != nil {
+		return nil, err
+	} else {
+		fg.ksym = ksym
+	}
 
 	if err := fg.parseOption(opt); err != nil {
 		return fg, err
@@ -203,7 +209,7 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 	return fg, nil
 }
 
-func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool) (*FuncInfo, bool, error) {
+func (fg *FuncGraph) matchSymByExpr(sym KernelSymbol, exprs []*FuncExpr, isEntry bool) (*FuncInfo, bool, error) {
 	for _, expr := range exprs {
 		if sym.Module == expr.Module && sym.Name == expr.Name {
 			id, info := fg.findBTFInfo(sym)
@@ -215,10 +221,12 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 				return nil, false, fmt.Errorf("%s%s has no available btf info", m, expr.Name)
 			}
 			fn := &FuncInfo{
-				IsEntry: isEntry,
-				Symbol:  sym,
-				id:      id,
-				Btfinfo: info,
+				IsEntry:  isEntry,
+				ModName:  sym.Module,
+				Addr:     sym.Addr,
+				FuncName: sym.Name,
+				id:       id,
+				Btfinfo:  info,
 			}
 			fn.InitArgsRet()
 			for _, data := range expr.Datas {
@@ -238,10 +246,9 @@ func (fg *FuncGraph) matchSymByExpr(sym Symbol, exprs []*FuncExpr, isEntry bool)
 	return nil, false, nil
 }
 
-func (fg *FuncGraph) matchSymByDwarf(sym Symbol, funcsOfDwarf map[Symbol]struct{}, isEntry bool) (*FuncInfo, bool) {
+func (fg *FuncGraph) matchSymByDwarf(sym KernelSymbol, funcsOfDwarf map[Symbol]struct{}, isEntry bool) (*FuncInfo, bool) {
 	symD := Symbol{
 		Name:   sym.Name,
-		Addr:   0,
 		Module: sym.Module,
 	}
 
@@ -251,10 +258,12 @@ func (fg *FuncGraph) matchSymByDwarf(sym Symbol, funcsOfDwarf map[Symbol]struct{
 		// 	return nil, false
 		// }
 		fn := &FuncInfo{
-			IsEntry: isEntry,
-			Symbol:  sym,
-			id:      id,
-			Btfinfo: info,
+			IsEntry:  isEntry,
+			ModName:  sym.Module,
+			Addr:     sym.Addr,
+			FuncName: sym.Name,
+			id:       id,
+			Btfinfo:  info,
 		}
 		if info != nil {
 			fn.InitArgsRet()
@@ -266,7 +275,7 @@ func (fg *FuncGraph) matchSymByDwarf(sym Symbol, funcsOfDwarf map[Symbol]struct{
 
 }
 
-func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (*FuncInfo, bool) {
+func (fg *FuncGraph) matchSymByGlobs(sym KernelSymbol, globs []string, isEntry bool) (*FuncInfo, bool) {
 	for _, name := range globs {
 		mod := ""
 		s := strings.SplitN(name, ":", 2)
@@ -282,10 +291,12 @@ func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (
 				// 	return nil, false
 				// }
 				fn := &FuncInfo{
-					IsEntry: isEntry,
-					Symbol:  sym,
-					id:      id,
-					Btfinfo: info,
+					IsEntry:  isEntry,
+					ModName:  sym.Module,
+					Addr:     sym.Addr,
+					FuncName: sym.Name,
+					id:       id,
+					Btfinfo:  info,
 				}
 				if info != nil {
 					fn.InitArgsRet()
@@ -297,7 +308,7 @@ func (fg *FuncGraph) matchSymByGlobs(sym Symbol, globs []string, isEntry bool) (
 	return nil, false
 }
 
-func (fg *FuncGraph) findBTFInfo(sym Symbol) (btf.TypeID, *btf.Func) {
+func (fg *FuncGraph) findBTFInfo(sym KernelSymbol) (btf.TypeID, *btf.Func) {
 
 	spec, err := LoadBTFSpec(sym.Module)
 	if err != nil {
@@ -336,15 +347,19 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 	allowedCnt := 0
 	dup := map[string]struct{}{}
 	kprobeSyms := availKprobeSymbols()
-
-	for sym := range AllKSyms() {
-		if _, ok := kprobeSyms[Symbol{
+	sym := KernelSymbol{}
+	kiter := &KernelSymbolIterator{
+		K: fg.ksym,
+	}
+	for kiter.Next(&sym) {
+		// fmt.Printf("%+v\n", sym)
+		// for sym := range fg.ksym.AllKernelSymbols() {
+		if _, ok := kprobeSyms[KprobeSymbol{
 			Name:   sym.Name,
 			Module: sym.Module,
 		}]; !ok {
 			continue
 		}
-
 		if _, match := fg.matchSymByGlobs(sym, opt.DenyFuncs, false); match {
 			continue
 		}
@@ -568,8 +583,8 @@ func (fg *FuncGraph) load() error {
 	fnSpec := spec.Maps["func_info"]
 	for _, fn := range fg.funcs {
 		var name [40]int8
-		for i := 0; i < 40 && i < len(fn.Name); i++ {
-			name[i] = int8(fn.Name[i])
+		for i := 0; i < 40 && i < len(fn.FuncName); i++ {
+			name[i] = int8(fn.FuncName[i])
 		}
 		basic := funcgraphFuncBasic{
 			Id:          uint32(fn.id),
@@ -786,17 +801,17 @@ func (fg *FuncGraph) Run() error {
 		defer kpMultiRet.Close()
 	} else {
 		for _, f := range fg.funcs {
-			kp, err := link.Kprobe(f.Name, fg.objs.Funcentry, nil)
+			kp, err := link.Kprobe(f.FuncName, fg.objs.Funcentry, nil)
 			if err != nil {
-				return fmt.Errorf("opening kprobe %s: %w", f.Name, err)
+				return fmt.Errorf("opening kprobe %s: %w", f.FuncName, err)
 			}
-			fmt.Printf("kprobe %s sucessfully\n", f.Name)
+			fmt.Printf("kprobe %s sucessfully\n", f.FuncName)
 			fg.links = append(fg.links, kp)
-			kretp, err := link.Kretprobe(f.Name, fg.objs.Funcret, nil)
+			kretp, err := link.Kretprobe(f.FuncName, fg.objs.Funcret, nil)
 			if err != nil {
-				return fmt.Errorf("opening kretprobe %s: %w", f.Name, err)
+				return fmt.Errorf("opening kretprobe %s: %w", f.FuncName, err)
 			}
-			fmt.Printf("kretprobe %s sucessfully\n", f.Name)
+			fmt.Printf("kretprobe %s sucessfully\n", f.FuncName)
 			fg.links = append(fg.links, kretp)
 		}
 	}
@@ -971,6 +986,9 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 	var t [1024]byte
 	b := t[:0]
 
+	repeatedSpaces := "" +
+		"                                                                " +
+		"                                                                "
 	// start := time.Unix(int64(fg.bootTime), int64(event.StartTime)).Format("15:04:05.000000")
 	// end := time.Unix(int64(fg.bootTime), int64(event.EndTime)).Format("15:04:05.000000")
 
@@ -1008,25 +1026,80 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 		if addr == 0 {
 			break
 		}
-		sym, err := SymbolByAddr(addr)
+		var ksym KernelSymbol
+		err := fg.ksym.FramesByAddr(addr, &ksym)
 		if err != nil {
 			fg.buf.WriteString(err.Error())
 			fg.buf.WriteString("\n")
 		}
-		mod := ""
-		if sym.Module != "" {
-			mod = "[" + sym.Module + "]"
+		for _, f := range ksym.Inlined {
+			b = t[:0]
+			b = append(b, " (inline by) "...)
+			b = append(b, f.Name...)
+			if f.file != "" {
+				if delta := 64 - len(b); delta > 0 {
+					b = append(b, repeatedSpaces[:delta]...)
+				}
+				// fg.buf.WriteString(" at ")
+				// fg.buf.WriteString(f.file)
+				b = append(b, f.file...)
+				b = append(b, ":"...)
+				// fg.buf.WriteString(":")
+				// b = t[:0]
+				b = strconv.AppendUint(b, uint64(f.line), 10)
+				// fg.buf.Write(b)
+			}
+			b = append(b, "\n"...)
+			fg.buf.Write(b)
 		}
-		// stackLine := fmt.Sprintf()
+
 		b = t[:0]
-		b = strconv.AppendUint(b, addr-sym.Addr, 16)
-		// off := strconv.FormatUint(addr-sym.Addr, 16)
-		fg.buf.WriteString(sym.Name)
-		fg.buf.WriteString("+0x")
+
+		b = append(b, ksym.Name...)
+		// fg.buf.WriteString(f.funeName)
+		if ksym.Offset != 0 {
+			b = append(b, "+0x"...)
+			// fg.buf.WriteString("+0x")
+			// b = t[:0]
+			b = strconv.AppendUint(b, ksym.Offset, 16)
+			// fg.buf.Write(b)
+		}
+		if ksym.Module != "vmlinux" {
+			b = append(b, " ["...)
+			b = append(b, ksym.Module...)
+			b = append(b, "]"...)
+			// fg.buf.WriteString(" ")
+			// fg.buf.WriteString("[")
+			// fg.buf.WriteString(f.module)
+			// fg.buf.WriteString("]")
+		}
+
+		if ksym.file != "" {
+			if delta := 64 - len(b); delta > 0 {
+				b = append(b, repeatedSpaces[:delta]...)
+			}
+			// fg.buf.WriteString(" at ")
+			// fg.buf.WriteString(f.file)
+			b = append(b, ksym.file...)
+			b = append(b, ":"...)
+			// fg.buf.WriteString(":")
+			// b = t[:0]
+			b = strconv.AppendUint(b, uint64(ksym.line), 10)
+			// fg.buf.Write(b)
+		}
+		b = append(b, "\n"...)
 		fg.buf.Write(b)
-		fg.buf.WriteString(" ")
-		fg.buf.WriteString(mod)
-		fg.buf.WriteString("\n")
+
+		// stackLine := fmt.Sprintf()
+		// off := strconv.FormatUint(addr-sym.Addr, 16)
+		// fg.buf.WriteString(sym.Name)
+		// fg.buf.WriteString("+0x")
+		// fg.buf.Write(b)
+		// fg.buf.WriteString(" ")
+		// fg.buf.WriteString(mod)
+		// fg.buf.WriteString("      ")
+		// fg.buf.WriteString(sym.LOC)
+		// fg.buf.WriteString("\n")
 		// fmt.Fprintf(s, "%s+%#x %s\n", sym.Name, addr-sym.Addr, mod)
 		// buf.WriteString(stackLine)
 	}
@@ -1061,12 +1134,12 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 		d := time.Duration(e.Duration)
 
 		funcInfo := fg.idToFuncs[btf.TypeID(e.Id)]
-		if e.Id == 0 {
-			if sym, err := SymbolByAddr(e.Ip); err == nil {
-				funcInfo.Symbol = sym
-			}
-		}
-		sym := funcInfo.Symbol
+		// if e.Id == 0 {
+		// 	if sym, err := SymbolByAddr(e.Ip); err == nil {
+		// 		funcInfo.Symbol = sym
+		// 	}
+		// }
+		// sym := funcInfo.Symbol
 		prevSeqId = e.SeqId
 		if e.Type == uint8(EntryEvent) {
 			if i+1 < len(events) && events[i+1].Type == uint8(RetEvent) &&
@@ -1092,11 +1165,11 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 				fg.buf.WriteString(" | ")
 				fg.buf.Write(fg.spaceCache[:e.Depth*2])
 				fg.buf.WriteString("\u2194 ")
-				fg.buf.WriteString(sym.Name)
+				fg.buf.WriteString(funcInfo.FuncName)
 				fg.buf.WriteString(" ")
-				if sym.Module != "" {
+				if funcInfo.ModName != "" {
 					fg.buf.WriteString("[")
-					fg.buf.WriteString(sym.Module)
+					fg.buf.WriteString(funcInfo.ModName)
 					fg.buf.WriteString("] ")
 				}
 				funcInfo.ShowPara(e, fg.opt, fg.buf)
@@ -1122,11 +1195,11 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 				fg.buf.WriteString(" | ")
 				fg.buf.Write(fg.spaceCache[:e.Depth*2])
 				fg.buf.WriteString("\u2192 ")
-				fg.buf.WriteString(sym.Name)
+				fg.buf.WriteString(funcInfo.FuncName)
 				fg.buf.WriteString(" ")
-				if sym.Module != "" {
+				if funcInfo.ModName != "" {
 					fg.buf.WriteString("[")
-					fg.buf.WriteString(sym.Module)
+					fg.buf.WriteString(funcInfo.ModName)
 					fg.buf.WriteString("] ")
 				}
 				funcInfo.ShowPara(e, fg.opt, fg.buf)
@@ -1152,11 +1225,11 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 			fg.buf.WriteString(" | ")
 			fg.buf.Write(fg.spaceCache[:e.Depth*2])
 			fg.buf.WriteString("\u2190 ")
-			fg.buf.WriteString(sym.Name)
+			fg.buf.WriteString(funcInfo.FuncName)
 			fg.buf.WriteString(" ")
-			if sym.Module != "" {
+			if funcInfo.ModName != "" {
 				fg.buf.WriteString("[")
-				fg.buf.WriteString(sym.Module)
+				fg.buf.WriteString(funcInfo.ModName)
 				fg.buf.WriteString("] ")
 			}
 			funcInfo.ShowRet(e, fg.opt, fg.buf)

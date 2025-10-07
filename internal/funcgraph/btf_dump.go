@@ -24,6 +24,7 @@ type dumpOption struct {
 	typStringCache map[btf.Type]string
 	typSizeCache   map[btf.Type]int
 	compact        bool
+	ksym           *KernelSymbolizer
 }
 
 func NewDumpOption() (*dumpOption, error) {
@@ -42,6 +43,12 @@ func NewDumpOption() (*dumpOption, error) {
 	}
 	for i := 0; i < len(d.spaceCache); i++ {
 		d.spaceCache[i] = ' '
+	}
+
+	if ksym, err := NewKsymbolizer(); err != nil {
+		return nil, err
+	} else {
+		d.ksym = ksym
 	}
 
 	return &d, nil
@@ -554,7 +561,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		}
 		opt.WriteStrings("0x", toString(msg))
 		if p != 0 && !opt.compact {
-			if sym, err := SymbolByAddr(p); err == nil && sym.Addr == p {
+			if sym, err := opt.ksym.SymbolByAddrSigle(p); err == nil && sym.Addr == p {
 				opt.WriteStrings(" <", sym.Name, ">")
 			}
 		}

@@ -25,8 +25,10 @@ type Arg struct {
 }
 
 type FuncInfo struct {
-	IsEntry bool
-	Symbol
+	IsEntry  bool
+	ModName  string
+	Addr     uint64
+	FuncName string
 	id       btf.TypeID
 	Btfinfo  *btf.Func
 	args     []Arg
@@ -137,10 +139,10 @@ func (f *FuncInfo) ShowRetTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer
 
 func (f *FuncInfo) String() string {
 	m := ""
-	if f.Module != "" {
-		m = f.Module + ":"
+	if f.ModName != "" {
+		m = f.ModName + ":"
 	}
-	return m + f.Name
+	return m + f.FuncName
 }
 
 // func (f *FuncInfo) Format(fs fmt.State, verb rune) {
