@@ -63,6 +63,8 @@ volatile const u32 comm_allow_cnt = 0;
 volatile const u32 comm_deny_cnt = 0;
 volatile const u32 pid_allow_cnt = 0;
 volatile const u32 pid_deny_cnt = 0;
+volatile const u32 parent_ip_allow_cnt = 0;
+volatile const u32 parent_ip_deny_cnt = 0;
 
 volatile const u64 duration_ms = 0;
 
@@ -210,6 +212,13 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, u64);
+    __type(value, bool);
+    __uint(max_entries, 99);
+} parent_ip_filter SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 1);
     __type(key, u64);
     __type(value, bool);
@@ -328,6 +337,17 @@ static __always_inline bool comm_allowed(void) {
     verdict_ptr = bpf_map_lookup_elem(&comms_filter, comm);
     if (!verdict_ptr) return comm_allow_cnt == 0;
 
+    return *verdict_ptr;
+}
+
+static __always_inline bool parent_ip_allowed(u64 ip) {
+    bool *verdict_ptr;
+
+    if (parent_ip_allow_cnt + parent_ip_deny_cnt == 0) return true;
+
+    verdict_ptr = bpf_map_lookup_elem(&parent_ip_filter, &ip);
+    
+    if (!verdict_ptr) return parent_ip_allow_cnt == 0;
     return *verdict_ptr;
 }
 
@@ -954,6 +974,12 @@ int funcentry(struct pt_regs *ctx) {
         return 0;
     }
 
+    u64 ip =0;
+    long err = bpf_get_stack(ctx, &ip, sizeof(ip), 1);
+    if (err >=0 && !parent_ip_allowed(ip)) {
+        return 0;
+    }
+
     return handle_entry(ctx);
 }
 
@@ -1105,6 +1131,12 @@ int funcret(struct pt_regs *ctx) {
     }
 
     if (!comm_allowed()) {
+        return 0;
+    }
+
+    u64 ip =0;
+    long err = bpf_get_stack(ctx, &ip, sizeof(ip), 0);
+    if (err >=0 && !parent_ip_allowed(ip)) {
         return 0;
     }
 

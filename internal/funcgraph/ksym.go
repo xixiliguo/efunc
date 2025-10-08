@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"unique"
 	"unsafe"
 
@@ -702,6 +703,24 @@ func (k *KernelSymbolizer) SymbolByAddrSigle(addr uint64) (sym KernelSymbol, err
 	sym.Name = funcName
 	sym.Offset = offset
 	return
+}
+
+func (k *KernelSymbolizer) SymbolByName(name string) (addr uint64, err error) {
+	modName := "vmlinux"
+	if idx := strings.Index(name, ":"); idx != -1 {
+		modName = name[:idx]
+		name = name[idx+1:]
+	}
+	for _, m := range k.modSpaces {
+		if m.name == modName {
+			for _, sym := range m.symbols {
+				if m.stringAt(sym.index) == name {
+					return sym.addr, nil
+				}
+			}
+		}
+	}
+	return 0, ErrNotFoundKsym
 }
 
 func (k *KernelSymbolizer) moduleByAddr(addr uint64) (*moduleAddrSpace, error) {

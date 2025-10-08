@@ -164,6 +164,32 @@ ENVIRONMENT:
 							return nil
 						},
 					},
+					&cli.StringSliceFlag{
+						Name:  "parent-ip",
+						Value: nil,
+						Usage: "only trace function with given parent ip",
+						Action: func(ctx *cli.Context, s []string) error {
+							for _, ss := range s {
+								if ss == "" {
+									return fmt.Errorf("parent-ip can not empty string")
+								}
+							}
+							return nil
+						},
+					},
+					&cli.StringSliceFlag{
+						Name:  "no-parent-ip",
+						Value: nil,
+						Usage: "skip tracing function with given parent ip",
+						Action: func(ctx *cli.Context, s []string) error {
+							for _, ss := range s {
+								if ss == "" {
+									return fmt.Errorf("no-parent-ip can not empty string")
+								}
+							}
+							return nil
+						},
+					},
 					&cli.BoolFlag{
 						Name:    "verbose",
 						Aliases: []string{"v"},
@@ -308,6 +334,8 @@ ENVIRONMENT:
 						DenyPids:          ctx.IntSlice("no-pid"),
 						AllowComms:        ctx.StringSlice("comm"),
 						DenyComms:         ctx.StringSlice("no-comm"),
+						AllowParentIPs:    ctx.StringSlice("parent-ip"),
+						DenyParentIPs:     ctx.StringSlice("no-parent-ip"),
 						Verbose:           ctx.Bool("verbose"),
 						BpfLog:            ctx.Bool("bpf-log"),
 						DryRun:            ctx.Bool("dry-run"),

@@ -63,6 +63,8 @@ type Option struct {
 	DenyPids          []int
 	AllowComms        []string
 	DenyComms         []string
+	AllowParentIPs    []string
+	DenyParentIPs     []string
 	Verbose           bool
 	BpfLog            bool
 	DryRun            bool
@@ -120,43 +122,46 @@ var defaultDenyFuncs = []string{
 }
 
 type FuncGraph struct {
-	funcs             []*FuncInfo
-	links             []link.Link
-	idToFuncs         map[btf.TypeID]*FuncInfo
-	verbose           bool
-	bpfLog            bool
-	dryRun            bool
-	maxTraceSize      uint32
-	maxTraceEventSize uint32
-	maxRingBufferSize uint32
-	mode              string
-	allow_pid_cnt     uint32
-	deny_pid_cnt      uint32
-	pids              map[uint32]bool
-	allow_comm_cnt    uint32
-	deny_comm_cnt     uint32
-	comms             map[[16]uint8]bool
-	haveKprobeMulti   bool
-	haveGetFuncIP     bool
-	kretOffset        uint64
-	bootTime          uint64
-	taskToEvents      map[uint64]*FuncEvents
-	eventsPool        sync.Pool
-	dataPool          sync.Pool
-	buf               *bytes.Buffer
-	output            *os.File
-	stopper           chan os.Signal
-	objs              funcgraphObjects
-	opt               *dumpOption
-	spaceCache        [1024]byte
-	targetCmd         *exec.Cmd
-	targetCmdError    error
-	targetCmdRecv     chan int
-	targetCmdSend     chan int
-	inheritChild      bool
-	duration          uint64
-	depth             uint64
-	ksym              *KernelSymbolizer
+	funcs               []*FuncInfo
+	links               []link.Link
+	idToFuncs           map[btf.TypeID]*FuncInfo
+	verbose             bool
+	bpfLog              bool
+	dryRun              bool
+	maxTraceSize        uint32
+	maxTraceEventSize   uint32
+	maxRingBufferSize   uint32
+	mode                string
+	allow_pid_cnt       uint32
+	deny_pid_cnt        uint32
+	pids                map[uint32]bool
+	allow_comm_cnt      uint32
+	deny_comm_cnt       uint32
+	comms               map[[16]uint8]bool
+	allow_parent_ip_cnt uint32
+	deny_parent_ip_cnt  uint32
+	parent_ips          map[uint64]bool
+	haveKprobeMulti     bool
+	haveGetFuncIP       bool
+	kretOffset          uint64
+	bootTime            uint64
+	taskToEvents        map[uint64]*FuncEvents
+	eventsPool          sync.Pool
+	dataPool            sync.Pool
+	buf                 *bytes.Buffer
+	output              *os.File
+	stopper             chan os.Signal
+	objs                funcgraphObjects
+	opt                 *dumpOption
+	spaceCache          [1024]byte
+	targetCmd           *exec.Cmd
+	targetCmdError      error
+	targetCmdRecv       chan int
+	targetCmdSend       chan int
+	inheritChild        bool
+	duration            uint64
+	depth               uint64
+	ksym                *KernelSymbolizer
 }
 
 func NewFuncGraph(opt *Option) (*FuncGraph, error) {
@@ -173,6 +178,7 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 		idToFuncs:         map[btf.TypeID]*FuncInfo{},
 		pids:              map[uint32]bool{},
 		comms:             map[[16]uint8]bool{},
+		parent_ips:        map[uint64]bool{},
 		taskToEvents:      map[uint64]*FuncEvents{},
 		buf:               bytes.NewBuffer(make([]byte, 0, 4096)),
 		targetCmdRecv:     make(chan int),
@@ -476,6 +482,39 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 		fg.comms[key] = false
 	}
 
+	for _, ip := range opt.AllowParentIPs {
+		idx := strings.Index(ip, "+")
+		name := ip[:idx]
+		addr, err := fg.ksym.SymbolByName(name)
+		if err != nil {
+			fmt.Printf("parse %s: %s, skip it\n", ip, err)
+			continue
+		}
+		off, err := strconv.ParseUint(ip[idx+1:], 0, 64)
+		if err != nil {
+			fmt.Printf("parse %s: %s, skip it\n", ip, err)
+			continue
+		}
+		fg.allow_parent_ip_cnt++
+		fg.parent_ips[addr+off] = true
+	}
+	for _, ip := range opt.DenyParentIPs {
+		idx := strings.Index(ip, "+")
+		name := ip[:idx]
+		addr, err := fg.ksym.SymbolByName(name)
+		if err != nil {
+			fmt.Printf("parse %s: %s, skip it\n", ip, err)
+			continue
+		}
+		off, err := strconv.ParseUint(ip[idx+1:], 0, 64)
+		if err != nil {
+			fmt.Printf("parse %s: %s, skip it\n", ip, err)
+			continue
+		}
+		fg.deny_parent_ip_cnt++
+		fg.parent_ips[addr+off] = false
+	}
+
 	return nil
 }
 
@@ -576,6 +615,12 @@ func (fg *FuncGraph) load() error {
 		commSpec.Contents = append(commSpec.Contents, ebpf.MapKV{Key: comm, Value: action})
 	}
 	commSpec.MaxEntries = uint32(len(commSpec.Contents) + 1)
+
+	parentIPSpec := spec.Maps["parent_ip_filter"]
+	for addr, action := range fg.parent_ips {
+		parentIPSpec.Contents = append(parentIPSpec.Contents, ebpf.MapKV{Key: addr, Value: action})
+	}
+	parentIPSpec.MaxEntries = uint32(len(parentIPSpec.Contents) + 1)
 
 	maxTraceDataSize := uint32(0)
 	maxAllTraceSize := uint32(0)
@@ -698,6 +743,8 @@ func (fg *FuncGraph) load() error {
 	consts["pid_deny_cnt"] = fg.deny_pid_cnt
 	consts["comm_allow_cnt"] = fg.allow_comm_cnt
 	consts["comm_deny_cnt"] = fg.deny_comm_cnt
+	consts["parent_ip_allow_cnt"] = fg.allow_parent_ip_cnt
+	consts["parent_ip_deny_cnt"] = fg.deny_parent_ip_cnt
 	consts["duration_ms"] = fg.duration
 	consts["max_depth"] = uint8(fg.depth)
 

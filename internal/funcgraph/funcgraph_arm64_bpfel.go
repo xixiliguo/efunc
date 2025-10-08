@@ -199,14 +199,15 @@ type funcgraphProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type funcgraphMapSpecs struct {
-	CallEvents    *ebpf.MapSpec `ebpf:"call_events"`
-	CommsFilter   *ebpf.MapSpec `ebpf:"comms_filter"`
-	EventStats    *ebpf.MapSpec `ebpf:"event_stats"`
-	Events        *ebpf.MapSpec `ebpf:"events"`
-	FuncBasicInfo *ebpf.MapSpec `ebpf:"func_basic_info"`
-	FuncInfo      *ebpf.MapSpec `ebpf:"func_info"`
-	PidsFilter    *ebpf.MapSpec `ebpf:"pids_filter"`
-	Ready         *ebpf.MapSpec `ebpf:"ready"`
+	CallEvents     *ebpf.MapSpec `ebpf:"call_events"`
+	CommsFilter    *ebpf.MapSpec `ebpf:"comms_filter"`
+	EventStats     *ebpf.MapSpec `ebpf:"event_stats"`
+	Events         *ebpf.MapSpec `ebpf:"events"`
+	FuncBasicInfo  *ebpf.MapSpec `ebpf:"func_basic_info"`
+	FuncInfo       *ebpf.MapSpec `ebpf:"func_info"`
+	ParentIpFilter *ebpf.MapSpec `ebpf:"parent_ip_filter"`
+	PidsFilter     *ebpf.MapSpec `ebpf:"pids_filter"`
+	Ready          *ebpf.MapSpec `ebpf:"ready"`
 }
 
 // funcgraphVariableSpecs contains global variables before they are loaded into the kernel.
@@ -225,6 +226,8 @@ type funcgraphVariableSpecs struct {
 	MaxDepth             *ebpf.VariableSpec `ebpf:"max_depth"`
 	MaxTraceBuf          *ebpf.VariableSpec `ebpf:"max_trace_buf"`
 	MaxTraceData         *ebpf.VariableSpec `ebpf:"max_trace_data"`
+	ParentIpAllowCnt     *ebpf.VariableSpec `ebpf:"parent_ip_allow_cnt"`
+	ParentIpDenyCnt      *ebpf.VariableSpec `ebpf:"parent_ip_deny_cnt"`
 	PidAllowCnt          *ebpf.VariableSpec `ebpf:"pid_allow_cnt"`
 	PidDenyCnt           *ebpf.VariableSpec `ebpf:"pid_deny_cnt"`
 	StartUnused          *ebpf.VariableSpec `ebpf:"start_unused"`
@@ -254,14 +257,15 @@ func (o *funcgraphObjects) Close() error {
 //
 // It can be passed to loadFuncgraphObjects or ebpf.CollectionSpec.LoadAndAssign.
 type funcgraphMaps struct {
-	CallEvents    *ebpf.Map `ebpf:"call_events"`
-	CommsFilter   *ebpf.Map `ebpf:"comms_filter"`
-	EventStats    *ebpf.Map `ebpf:"event_stats"`
-	Events        *ebpf.Map `ebpf:"events"`
-	FuncBasicInfo *ebpf.Map `ebpf:"func_basic_info"`
-	FuncInfo      *ebpf.Map `ebpf:"func_info"`
-	PidsFilter    *ebpf.Map `ebpf:"pids_filter"`
-	Ready         *ebpf.Map `ebpf:"ready"`
+	CallEvents     *ebpf.Map `ebpf:"call_events"`
+	CommsFilter    *ebpf.Map `ebpf:"comms_filter"`
+	EventStats     *ebpf.Map `ebpf:"event_stats"`
+	Events         *ebpf.Map `ebpf:"events"`
+	FuncBasicInfo  *ebpf.Map `ebpf:"func_basic_info"`
+	FuncInfo       *ebpf.Map `ebpf:"func_info"`
+	ParentIpFilter *ebpf.Map `ebpf:"parent_ip_filter"`
+	PidsFilter     *ebpf.Map `ebpf:"pids_filter"`
+	Ready          *ebpf.Map `ebpf:"ready"`
 }
 
 func (m *funcgraphMaps) Close() error {
@@ -272,6 +276,7 @@ func (m *funcgraphMaps) Close() error {
 		m.Events,
 		m.FuncBasicInfo,
 		m.FuncInfo,
+		m.ParentIpFilter,
 		m.PidsFilter,
 		m.Ready,
 	)
@@ -293,6 +298,8 @@ type funcgraphVariables struct {
 	MaxDepth             *ebpf.Variable `ebpf:"max_depth"`
 	MaxTraceBuf          *ebpf.Variable `ebpf:"max_trace_buf"`
 	MaxTraceData         *ebpf.Variable `ebpf:"max_trace_data"`
+	ParentIpAllowCnt     *ebpf.Variable `ebpf:"parent_ip_allow_cnt"`
+	ParentIpDenyCnt      *ebpf.Variable `ebpf:"parent_ip_deny_cnt"`
 	PidAllowCnt          *ebpf.Variable `ebpf:"pid_allow_cnt"`
 	PidDenyCnt           *ebpf.Variable `ebpf:"pid_deny_cnt"`
 	StartUnused          *ebpf.Variable `ebpf:"start_unused"`
