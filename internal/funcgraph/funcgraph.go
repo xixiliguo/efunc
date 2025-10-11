@@ -1081,7 +1081,7 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 		}
 		for _, f := range ksym.Inlined {
 			b = t[:0]
-			b = append(b, " (inline by) "...)
+			b = append(b, " (inline) "...)
 			b = append(b, f.Name...)
 			if f.file != "" {
 				if delta := 64 - len(b); delta > 0 {
