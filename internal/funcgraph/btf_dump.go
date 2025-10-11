@@ -561,8 +561,9 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		}
 		opt.WriteStrings("0x", toString(msg))
 		if p != 0 && !opt.compact {
-			if sym, err := opt.ksym.SymbolByAddrSigle(p); err == nil && sym.Addr == p {
-				opt.WriteStrings(" <", sym.Name, ">")
+			ksym := KernelSymbol{}
+			if err := opt.ksym.SymbolByAddr(p, &ksym); err == nil && ksym.Addr == p {
+				opt.WriteStrings(" <", ksym.Name, ">")
 			}
 		}
 	case *btf.Enum:

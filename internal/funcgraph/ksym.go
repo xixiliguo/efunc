@@ -637,23 +637,21 @@ func (m *moduleAddrSpace) addName(name string) uint32 {
 	return uint32(index)
 }
 
-func (m *moduleAddrSpace) SymbolByAddr(addr uint64) (funcName string, offset uint64, err error) {
+func (m *moduleAddrSpace) SymbolByAddr(addr uint64, ksym *KernelSymbol) (err error) {
 	idx := sort.Search(len(m.symbols), func(i int) bool {
-		return m.symbols[i].addr >= addr
+		return addr >= m.symbols[i].addr
 	})
 
 	if idx >= len(m.symbols) {
-		return "", 0, ErrNotFoundKsym
+		return ErrNotFoundKsym
 	}
 
-	sym := symbol{}
-	if idx < len(m.symbols) && m.symbols[idx].addr == addr {
-		sym = m.symbols[idx]
-	} else {
-		sym = m.symbols[idx-1]
-	}
-
-	return m.stringAt(sym.index), addr - sym.addr, nil
+	sym := m.symbols[idx]
+	ksym.Module = m.name
+	ksym.Name = m.stringAt(sym.index)
+	ksym.Addr = sym.addr
+	ksym.Offset = addr - sym.addr
+	return nil
 }
 
 func (m *moduleAddrSpace) FramesByAddr(addr uint64, ksym *KernelSymbol) error {
@@ -693,16 +691,12 @@ func (m *moduleAddrSpace) FramesByAddr(addr uint64, ksym *KernelSymbol) error {
 	return err
 }
 
-func (k *KernelSymbolizer) SymbolByAddrSigle(addr uint64) (sym KernelSymbol, err error) {
+func (k *KernelSymbolizer) SymbolByAddr(addr uint64, ksym *KernelSymbol) (err error) {
 	mod, err := k.moduleByAddr(addr)
 	if err != nil {
-		return sym, err
+		return err
 	}
-	sym.Module = mod.name
-	funcName, offset, err := mod.SymbolByAddr(addr)
-	sym.Name = funcName
-	sym.Offset = offset
-	return
+	return mod.SymbolByAddr(addr, ksym)
 }
 
 func (k *KernelSymbolizer) SymbolByName(name string) (addr uint64, err error) {
