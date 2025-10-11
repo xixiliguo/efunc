@@ -47,10 +47,13 @@ func (d DataExpr) String() string {
 			d.First.Addr.Imm)
 	}
 	for _, f := range d.Fields {
-		re += "->" + f.Name
-		if n, err := f.Index.ShowSignNumber(); err == nil {
-			re += fmt.Sprintf("[%d]", n)
+		for _, t := range f.Tokens {
+			re += "->" + t.Name
+			if n, err := t.Index.ShowSignNumber(); err == nil {
+				re += fmt.Sprintf("[%d]", n)
+			}
 		}
+
 	}
 	if d.ShowString {
 		re += ":str"
@@ -79,7 +82,25 @@ type Addr struct {
 }
 
 type Field struct {
-	Name  string `parser:"ArrowOperator@(Ident (Period Ident)*)"`
+	// Name  string `parser:"ArrowOperator@(Ident (Period Ident)*)"`
+	// Index Value  `parser:"(LeftBracket @Number RightBracket)?"`
+	Tokens []Token `parser:"ArrowOperator@@(Period @@)*"`
+}
+
+func (f *Field) String() string {
+	re := "->"
+	for _, token := range f.Tokens {
+		t := token.Name
+		if i, err := token.Index.ShowSignNumber(); err == nil {
+			t += fmt.Sprintf("[%d]", i)
+		}
+		re += t
+	}
+	return re
+}
+
+type Token struct {
+	Name  string `parser:"@Ident"`
 	Index Value  `parser:"(LeftBracket @Number RightBracket)?"`
 }
 

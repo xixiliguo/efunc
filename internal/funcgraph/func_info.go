@@ -484,12 +484,12 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) er
 	currStructType := btfPointerData.Target
 	offset := uint16(0)
 
-	fields := strings.Split(f.Name, ".")
-	for _, name := range fields {
+	// fields := strings.Split(f.Name, ".")
+	for _, token := range f.Tokens {
 		currStructType = btf.UnderlyingType(currStructType)
-		off, bitOff, bitSize, typ, found := caculateOffset(name, currStructType)
+		off, bitOff, bitSize, typ, found := caculateOffset(token.Name, currStructType)
 		if !found {
-			return fmt.Errorf("%+v is not field of %s", name, currStructType)
+			return fmt.Errorf("%+v is not field of %s", token.Name, currStructType)
 		}
 		currStructType = typ
 		offset += uint16(off)
@@ -497,28 +497,48 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) er
 		t.bitSize = uint8(bitSize)
 		// t.BitOff = bitOff
 		// t.BitSize = bitSize
-	}
-
-	if index, err := f.Index.ShowSignNumber(); err == nil {
-		currStructType = btf.UnderlyingType(currStructType)
-		if typ, ok := currStructType.(*btf.Array); ok {
-			if index < 0 {
-				return fmt.Errorf("array index %+v must >= 0", index)
-			}
-			if uint32(index) >= typ.Nelems {
-				return fmt.Errorf("array index %+v should below %+v", index, typ.Nelems)
-			}
-			currStructType = typ.Type
-			if sz, err := btf.Sizeof(currStructType); err == nil {
-				f.Name += fmt.Sprintf("[%d]", index)
-				offset += uint16(sz) * uint16(index)
+		if index, err := token.Index.ShowSignNumber(); err == nil {
+			currStructType = btf.UnderlyingType(currStructType)
+			if typ, ok := currStructType.(*btf.Array); ok {
+				if index < 0 {
+					return fmt.Errorf("array index %+v must >= 0", index)
+				}
+				if uint32(index) >= typ.Nelems {
+					return fmt.Errorf("array index %+v should below %+v", index, typ.Nelems)
+				}
+				currStructType = typ.Type
+				if sz, err := btf.Sizeof(currStructType); err == nil {
+					token.Name += fmt.Sprintf("[%d]", index)
+					offset += uint16(sz) * uint16(index)
+				} else {
+					return fmt.Errorf("%+v cannot get size: %s", currStructType, err)
+				}
 			} else {
-				return fmt.Errorf("%+v cannot get size: %s", currStructType, err)
+				return fmt.Errorf("%+v is not array", currStructType)
 			}
-		} else {
-			return fmt.Errorf("%+v is not array", currStructType)
 		}
 	}
+
+	// if index, err := f.Index.ShowSignNumber(); err == nil {
+	// 	currStructType = btf.UnderlyingType(currStructType)
+	// 	if typ, ok := currStructType.(*btf.Array); ok {
+	// 		if index < 0 {
+	// 			return fmt.Errorf("array index %+v must >= 0", index)
+	// 		}
+	// 		if uint32(index) >= typ.Nelems {
+	// 			return fmt.Errorf("array index %+v should below %+v", index, typ.Nelems)
+	// 		}
+	// 		currStructType = typ.Type
+	// 		if sz, err := btf.Sizeof(currStructType); err == nil {
+	// 			f.Name += fmt.Sprintf("[%d]", index)
+	// 			offset += uint16(sz) * uint16(index)
+	// 		} else {
+	// 			return fmt.Errorf("%+v cannot get size: %s", currStructType, err)
+	// 		}
+	// 	} else {
+	// 		return fmt.Errorf("%+v is not array", currStructType)
+	// 	}
+	// }
 
 	t.typ = currStructType
 	t.offsets = append(t.offsets, offset)
@@ -528,7 +548,7 @@ func genTraceDataByField(fs []Field, idx int, btfData btf.Type, t *TraceData) er
 		return fmt.Errorf("%+v cannot get size: %s", currStructType, err)
 	}
 
-	t.name += "->" + f.Name
+	t.name += f.String()
 
 	return genTraceDataByField(fs, idx+1, currStructType, t)
 }
