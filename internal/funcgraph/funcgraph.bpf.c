@@ -94,6 +94,7 @@ enum trace_data_flags {
     DATA_DEREF = 2,
     DATA_SIGN = 4,
     DATA_CHAR_ARRAY = 8,
+    DATA_BUF = 16,
 };
 
 #define read_bits(v, len, shift) ((v >> shift) & ((1 << len) - 1))
@@ -558,6 +559,10 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
             sz = err;
         } else {
             if (t->flags & DATA_DEREF) {
+                bpf_probe_read_kernel(&data_ptr, sizeof(data_ptr),
+                                      (void *)data_ptr);
+            }
+            if (t->flags & DATA_BUF) {
                 bpf_probe_read_kernel(&data_ptr, sizeof(data_ptr),
                                       (void *)data_ptr);
             }

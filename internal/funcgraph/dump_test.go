@@ -45,7 +45,7 @@ func BenchmarkDumpDataByBTF(b *testing.B) {
 	var typ *btf.Struct
 	mustTypeByName(b, name, &typ)
 	for b.Loop() {
-		opt.Reset(rawData, false, 0, false)
+		opt.Reset(rawData, false, false, 0, 0, false)
 		opt.dumpDataByBTF(name, typ, 0, 0, 0)
 	}
 }

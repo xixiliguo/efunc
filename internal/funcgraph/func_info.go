@@ -66,7 +66,7 @@ func (f *FuncInfo) ShowPara(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 		}
 		// fmt.Printf("xxx %+v %+v %+v %+v %+v\n", funcInfo.Name, name, arg, e.Para, off)
 		data := (*[128]byte)(unsafe.Pointer(&e.Para[off]))
-		opt.Reset(data[:sz], false, 0, true)
+		opt.Reset(data[:sz], false, false, 0, 0, true)
 		opt.dumpDataByBTF(name, typ, 0, 0, 0)
 		dst.WriteString(opt.String())
 		dst.WriteString(" ")
@@ -89,7 +89,7 @@ func (f *FuncInfo) ShowRet(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 	}
 
 	data := (*[128]byte)(unsafe.Pointer(&e.Ret[off]))
-	opt.Reset(data[:sz], false, 0, true)
+	opt.Reset(data[:sz], false, false, 0, 0, true)
 	opt.dumpDataByBTF("ret", f.ret.Typ, 0, 0, 0)
 	dst.WriteString(opt.String())
 }
@@ -108,7 +108,7 @@ func (f *FuncInfo) ShowTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 		if idx+1 < len(f.trace) && e.DataOff[idx+1] >= 0 {
 			end = e.DataOff[idx+1]
 		}
-		opt.Reset((*e.Data)[off:end], t.isStr, int(10+e.Depth), false)
+		opt.Reset((*e.Data)[off:end], t.isStr, t.isBuf, t.size, int(10+e.Depth), false)
 		o, s := t.bitOff, t.bitSize
 		opt.dumpDataByBTF(t.name, t.typ, 0, int(o), int(s))
 		dst.WriteString(opt.String())
@@ -129,7 +129,7 @@ func (f *FuncInfo) ShowRetTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer
 		if idx+1 < len(f.trace) && e.DataOff[idx+1] >= 0 {
 			end = e.DataOff[idx+1]
 		}
-		opt.Reset((*e.Data)[off:end], t.isStr, int(10+e.Depth), false)
+		opt.Reset((*e.Data)[off:end], t.isStr, t.isBuf, t.size, int(10+e.Depth), false)
 		o, s := t.bitOff, t.bitSize
 		opt.dumpDataByBTF(t.name, t.typ, 0, int(o), int(s))
 		dst.WriteString(opt.String())
@@ -332,8 +332,16 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 		t.name = "*" + t.name
 	}
 
-	if dataExpr.ShowString {
+	if dataExpr.Func == BuiltInFuncString {
 		t.isStr = true
+		t.size = 64
+		if s, err := strconv.Atoi(os.Getenv("MAX_STRING_SIZE")); err == nil && s > 0 {
+			t.size = s
+		}
+	}
+
+	if dataExpr.Func == BuiltInFuncBuf {
+		t.isBuf = true
 		t.size = 64
 		if s, err := strconv.Atoi(os.Getenv("MAX_STRING_SIZE")); err == nil && s > 0 {
 			t.size = s

@@ -17,12 +17,12 @@ type FuncExpr struct {
 }
 
 type DataExpr struct {
-	Dereference bool     `parser:"@DereferenceOperator?"`
-	Typ         CastType `parser:"(LeftEdge Struct Whitespace @@ Whitespace DereferenceOperator RightEdge)?"`
-	First       Primary  `parser:"@@"`
-	Fields      []Field  `parser:"@@*"`
-	ShowString  bool     `parser:"@ShowString?"`
-	CompareInfo Compare  `parser:"@@?"`
+	Dereference bool        `parser:"@DereferenceOperator?"`
+	Typ         CastType    `parser:"(LeftEdge Struct Whitespace @@ Whitespace DereferenceOperator RightEdge)?"`
+	First       Primary     `parser:"@@"`
+	Fields      []Field     `parser:"@@*"`
+	Func        BuiltInFunc `parser:"(Colon @Ident)?"`
+	CompareInfo Compare     `parser:"@@?"`
 }
 
 func (d DataExpr) String() string {
@@ -55,8 +55,11 @@ func (d DataExpr) String() string {
 		}
 
 	}
-	if d.ShowString {
+	if d.Func == BuiltInFuncString {
 		re += ":str"
+	}
+	if d.Func == BuiltInFuncBuf {
+		re += ":buf"
 	}
 	if d.CompareInfo.Operator != "" {
 		re += " " + d.CompareInfo.Operator + " " + d.CompareInfo.Threshold.s
@@ -137,13 +140,41 @@ func (v Value) ShowUnsignNumber() (uint64, error) {
 	return strconv.ParseUint(v.s, 0, 64)
 }
 
+type BuiltInFunc int
+
+const (
+	BuiltInFuncNone   BuiltInFunc = 0
+	BuiltInFuncString BuiltInFunc = iota
+	BuiltInFuncBuf
+)
+
+func (f *BuiltInFunc) Capture(values []string) error {
+	switch values[0] {
+	case "str":
+		*f = BuiltInFuncString
+	case "buf":
+		*f = BuiltInFuncBuf
+	default:
+		return fmt.Errorf("%s is not supported built-in function", values[0])
+	}
+	return nil
+}
+
+// func (f BuiltInFunc) ShowFunc() (string, error) {
+// 	switch f.s {
+// 	case "str":
+// 		return
+
+// 	}
+// 	return "", errors.New("characters must be included in double quotes")
+// }
+
 var funcParserFunc = sync.OnceValue[*participle.Parser[FuncExpr]](func() *participle.Parser[FuncExpr] {
 	clexer := lexer.MustSimple([]lexer.SimpleRule{
 		{Name: "DereferenceOperator", Pattern: `\*`},
 		{Name: "Struct", Pattern: `struct`},
 		{Name: "Ident", Pattern: `[a-zA-Z_][a-zA-Z_0-9]*`},
 		{Name: "ArrowOperator", Pattern: `->`},
-		{Name: "ShowString", Pattern: `:str`},
 		{Name: "Whitespace", Pattern: `[ \t]+`},
 		{Name: "Colon", Pattern: `:`},
 		{Name: "Period", Pattern: `\.`},

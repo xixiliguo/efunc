@@ -3,6 +3,7 @@ package funcgraph
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -17,6 +18,8 @@ import (
 type dumpOption struct {
 	data           []byte
 	isStr          bool
+	isBuf          bool
+	bufSize        int
 	level          int
 	showZero       bool
 	buf            *bytes.Buffer
@@ -35,6 +38,8 @@ func NewDumpOption() (*dumpOption, error) {
 	d := dumpOption{
 		data:           nil,
 		isStr:          false,
+		isBuf:          false,
+		bufSize:        0,
 		level:          0,
 		showZero:       isShow,
 		buf:            bytes.NewBuffer(make([]byte, 0, 4096)),
@@ -54,9 +59,11 @@ func NewDumpOption() (*dumpOption, error) {
 	return &d, nil
 }
 
-func (opt *dumpOption) Reset(data []byte, isStr bool, level int, compact bool) {
+func (opt *dumpOption) Reset(data []byte, isStr bool, isBuf bool, BufSize int, level int, compact bool) {
 	opt.data = data
 	opt.isStr = isStr
+	opt.isBuf = isBuf
+	opt.bufSize = BufSize
 	opt.level = level
 	opt.compact = compact
 	opt.buf.Reset()
@@ -375,6 +382,14 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 		re := ByteSliceToString(data[offset:])
 		opt.WriteStrings(space, name, connector, re)
 		return sz
+	}
+
+	if opt.isBuf {
+		re := make([]byte, opt.bufSize*2)
+		hex.Encode(re, data[offset:offset+opt.bufSize])
+		opt.WriteStrings(space, name, connector)
+		opt.buf.Write(re)
+		return opt.bufSize
 	}
 
 	switch t := btf.UnderlyingType(typ).(type) {

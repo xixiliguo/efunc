@@ -28,6 +28,7 @@ type TraceData struct {
 	isDefer     bool
 	isSign      bool
 	isCharArray bool
+	isBuf       bool
 	CmpOperator uint8
 	Target      uint64
 	TargetStr   string
@@ -45,6 +46,9 @@ func (t *TraceData) flags() (flag uint8) {
 	}
 	if t.isCharArray {
 		flag |= uint8(funcgraphTraceDataFlagsDATA_CHAR_ARRAY)
+	}
+	if t.isBuf {
+		flag |= uint8(funcgraphTraceDataFlagsDATA_BUF)
 	}
 	return
 }

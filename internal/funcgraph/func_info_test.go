@@ -23,7 +23,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{},
 						First:       Primary{Name: "skb"},
 						Fields:      nil,
-						ShowString:  false,
+						Func:        BuiltInFuncNone,
 						CompareInfo: Compare{},
 					},
 					{
@@ -31,7 +31,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{},
 						First:       Primary{Name: "skb"},
 						Fields:      []Field{{[]Token{Token{Name: "head"}}}},
-						ShowString:  false,
+						Func:        BuiltInFuncNone,
 						CompareInfo: Compare{},
 					},
 					{
@@ -39,7 +39,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{},
 						First:       Primary{Name: "skb"},
 						Fields:      []Field{{[]Token{Token{Name: "transport_header"}}}},
-						ShowString:  false,
+						Func:        BuiltInFuncNone,
 						CompareInfo: Compare{},
 					},
 					{
@@ -47,7 +47,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{Name: "tcphdr"},
 						First:       Primary{Addr: Addr{Base: 1, Index: 2, Scale: 1, Imm: 0}},
 						Fields:      []Field{{[]Token{Token{Name: "syn"}}}},
-						ShowString:  false,
+						Func:        BuiltInFuncNone,
 						CompareInfo: Compare{
 							Operator:  "==",
 							Threshold: Value{s: "1"},
@@ -66,7 +66,7 @@ func TestFuncExpr(t *testing.T) {
 						Typ:         CastType{},
 						First:       Primary{Name: "pathname"},
 						Fields:      []Field{{[]Token{Token{Name: "name"}}}},
-						ShowString:  true,
+						Func:        BuiltInFuncString,
 						CompareInfo: Compare{
 							Operator:  "==",
 							Threshold: Value{s: `"/etc/hosts"`},

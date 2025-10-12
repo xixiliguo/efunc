@@ -145,6 +145,7 @@ const (
 	funcgraphTraceDataFlagsDATA_DEREF      funcgraphTraceDataFlags = 2
 	funcgraphTraceDataFlagsDATA_SIGN       funcgraphTraceDataFlags = 4
 	funcgraphTraceDataFlagsDATA_CHAR_ARRAY funcgraphTraceDataFlags = 8
+	funcgraphTraceDataFlagsDATA_BUF        funcgraphTraceDataFlags = 16
 )
 
 // loadFuncgraph returns the embedded CollectionSpec for funcgraph.
