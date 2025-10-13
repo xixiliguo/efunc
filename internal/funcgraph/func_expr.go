@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/alecthomas/participle/v2"
@@ -47,13 +48,7 @@ func (d DataExpr) String() string {
 			d.First.Addr.Imm)
 	}
 	for _, f := range d.Fields {
-		for _, t := range f.Tokens {
-			re += "->" + t.Name
-			if n, err := t.Index.ShowSignNumber(); err == nil {
-				re += fmt.Sprintf("[%d]", n)
-			}
-		}
-
+		re += f.String()
 	}
 	if d.Func == BuiltInFuncString {
 		re += ":str"
@@ -92,13 +87,15 @@ type Field struct {
 
 func (f *Field) String() string {
 	re := "->"
+	ts := []string{}
 	for _, token := range f.Tokens {
 		t := token.Name
 		if i, err := token.Index.ShowSignNumber(); err == nil {
 			t += fmt.Sprintf("[%d]", i)
 		}
-		re += t
+		ts = append(ts, t)
 	}
+	re += strings.Join(ts, ".")
 	return re
 }
 

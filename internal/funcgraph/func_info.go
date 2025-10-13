@@ -333,6 +333,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 	}
 
 	if dataExpr.Func == BuiltInFuncString {
+		t.name += ":str"
 		t.isStr = true
 		t.size = 64
 		if s, err := strconv.Atoi(os.Getenv("MAX_STRING_SIZE")); err == nil && s > 0 {
@@ -341,6 +342,7 @@ func (f *FuncInfo) GenTraceData(dataExpr DataExpr) error {
 	}
 
 	if dataExpr.Func == BuiltInFuncBuf {
+		t.name += ":buf"
 		t.isBuf = true
 		t.size = 64
 		if s, err := strconv.Atoi(os.Getenv("MAX_STRING_SIZE")); err == nil && s > 0 {
