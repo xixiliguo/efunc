@@ -397,6 +397,7 @@ func findPath(name string) (string, error) {
 
 	locations := []string{
 		"/usr/lib/debug/lib/modules/%s",
+		"/usr/lib/debug/boot/vmlinux-%s",
 	}
 	result := ""
 	for _, loc := range locations {
@@ -405,7 +406,7 @@ func findPath(name string) (string, error) {
 			if err != nil {
 				return err
 			}
-			if !d.IsDir() && (d.Name() == name || d.Name() == name+".ko.debug") {
+			if !d.IsDir() && (d.Name() == name || d.Name() == name+"-"+release || d.Name() == name+".ko" || d.Name() == name+".ko.debug") {
 				result = path
 				return filepath.SkipAll
 			}
