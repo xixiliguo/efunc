@@ -500,7 +500,9 @@ func (k *KernelSymbolizer) loadKernelSymbol() error {
 			m = string(bytes.Trim(bs[3], "[]"))
 		}
 		if curr.name != m {
-			if curr, err = k.ModuleByName(m); err != nil {
+			if mod, err := k.ModuleByName(m); err == nil {
+				curr = mod
+			} else {
 				continue
 			}
 		}
