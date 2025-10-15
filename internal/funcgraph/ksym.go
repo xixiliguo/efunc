@@ -331,15 +331,16 @@ func (d *DebugInfo) parseCompileUnit(offset dwarf.Offset) error {
 		if i == 0 {
 			continue
 		}
-		lineFiles[i] = f.Name
-		// if p, err := filepath.Rel(compileDir, f.Name); err == nil {
-		// 	lineFiles[i] = p
-		// }
-		if filepath.IsAbs(f.Name) {
-			if idx := strings.Index(f.Name, getOSReleaseSep()); idx != -1 {
-				lineFiles[i] = f.Name[idx+len(getOSReleaseSep()):]
+		name := f.Name
+		if strings.HasPrefix(name, "../") {
+			filepath.Join(compileDir, name)
+		}
+		if filepath.IsAbs(name) {
+			if idx := strings.Index(name, getOSReleaseSep()); idx != -1 {
+				name = name[idx+len(getOSReleaseSep()):]
 			}
 		}
+		lineFiles[i] = name
 	}
 	d.lineFiles[cu.Offset] = lineFiles
 
@@ -355,8 +356,13 @@ func (d *DebugInfo) parseCompileUnit(offset dwarf.Offset) error {
 			line: le.Line,
 		}
 		fileName := le.File.Name
-		if p, err := filepath.Rel(compileDir, fileName); err == nil {
-			fileName = p
+		if strings.HasPrefix(fileName, "../") {
+			filepath.Join(compileDir, fileName)
+		}
+		if filepath.IsAbs(fileName) {
+			if idx := strings.Index(fileName, getOSReleaseSep()); idx != -1 {
+				fileName = fileName[idx+len(getOSReleaseSep()):]
+			}
 		}
 		line.file = unique.Make(fileName)
 		lines = append(lines, line)
