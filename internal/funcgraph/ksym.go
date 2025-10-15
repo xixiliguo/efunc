@@ -213,10 +213,10 @@ func newDebugInfo(modName string, data *dwarf.Data, offset uint64) (*DebugInfo, 
 
 func (d *DebugInfo) FrameByAddr(addr uint64, ksym *KernelSymbol) error {
 
-	addr -= d.offset
+	realAddr := addr - d.offset
 
 	idx := sort.Search(len(d.ranges), func(i int) bool {
-		return addr >= d.ranges[i].low
+		return realAddr >= d.ranges[i].low
 	})
 	if idx >= len(d.ranges) {
 		return fmt.Errorf("no found symbof for %x", addr)
@@ -233,9 +233,9 @@ func (d *DebugInfo) FrameByAddr(addr uint64, ksym *KernelSymbol) error {
 	funcOffset := uint64(0)
 	for _, tr := range d.subPrograms[cuOffset] {
 		for _, rng := range tr.Ranges {
-			if rng[0] <= addr && addr < rng[1] {
+			if rng[0] <= realAddr && realAddr < rng[1] {
 				name, _ = tr.Val(dwarf.AttrName).(string)
-				funcOffset = addr - rng[0]
+				funcOffset = realAddr - rng[0]
 				root = tr
 				break
 			}
@@ -245,7 +245,7 @@ func (d *DebugInfo) FrameByAddr(addr uint64, ksym *KernelSymbol) error {
 	lines := d.lineEntries[cuOffset]
 
 	idx = sort.Search(len(lines), func(i int) bool {
-		return addr >= lines[i].addr
+		return realAddr >= lines[i].addr
 	})
 	if idx >= len(lines) {
 		return fmt.Errorf("no found symbof for %x", addr)
@@ -268,7 +268,7 @@ func (d *DebugInfo) FrameByAddr(addr uint64, ksym *KernelSymbol) error {
 	// 	fmt.Printf("aaa %s %s %d\n", d.moduleName, lines[idx].File.Name, lines[idx].Line)
 	// }
 
-	for _, tr := range reader.InlineStack(root, addr) {
+	for _, tr := range reader.InlineStack(root, realAddr) {
 		offset := tr.Val(dwarf.AttrAbstractOrigin).(dwarf.Offset)
 		originName := d.abstractPrograms[offset]
 		fileIdx := tr.Val(dwarf.AttrCallFile).(int64)
