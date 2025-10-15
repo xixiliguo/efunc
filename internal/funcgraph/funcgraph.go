@@ -1078,6 +1078,7 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 		if err != nil {
 			fg.buf.WriteString(err.Error())
 			fg.buf.WriteString("\n")
+			continue
 		}
 		for _, f := range ksym.Inlined {
 			b = t[:0]

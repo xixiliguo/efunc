@@ -688,22 +688,19 @@ func (m *moduleAddrSpace) SymbolByAddr(addr uint64, ksym *KernelSymbol) (err err
 
 func (m *moduleAddrSpace) FramesByAddr(addr uint64, ksym *KernelSymbol) error {
 
-	if m.debugInfo == nil {
-		idx := sort.Search(len(m.symbols), func(i int) bool {
-			return addr >= m.symbols[i].addr
-		})
-		if idx >= len(m.symbols) {
-			return ErrNotFoundKsym
-		}
-		sym := m.symbols[idx]
-		ksym.Name = m.stringAt(sym.index)
-		ksym.Module = m.name
-		ksym.Offset = addr - sym.addr
-		return nil
+	idx := sort.Search(len(m.symbols), func(i int) bool {
+		return addr >= m.symbols[i].addr
+	})
+	if idx >= len(m.symbols) {
+		return ErrNotFoundKsym
 	}
-	err := m.debugInfo.FrameByAddr(addr, ksym)
-	if err != nil {
-		return err
+	sym := m.symbols[idx]
+	ksym.Name = m.stringAt(sym.index)
+	ksym.Module = m.name
+	ksym.Offset = addr - sym.addr
+
+	if m.debugInfo != nil {
+		m.debugInfo.FrameByAddr(addr, ksym)
 	}
 	if ksym.Name == "" && ksym.file != "" {
 		idx := sort.Search(len(m.symbols), func(i int) bool {
@@ -716,7 +713,7 @@ func (m *moduleAddrSpace) FramesByAddr(addr uint64, ksym *KernelSymbol) error {
 		ksym.Name = m.stringAt(sym.index)
 		ksym.Offset = addr - sym.addr
 	}
-	return err
+	return nil
 }
 
 func (k *KernelSymbolizer) SymbolByAddr(addr uint64, ksym *KernelSymbol) (err error) {
