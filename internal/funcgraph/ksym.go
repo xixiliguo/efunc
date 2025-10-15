@@ -143,6 +143,7 @@ type lineEntry struct {
 type DebugInfo struct {
 	moduleName       string
 	data             *dwarf.Data
+	offset           uint64
 	ranges           []rangeOffset
 	subPrograms      map[dwarf.Offset][]*godwarf.Tree
 	abstractPrograms map[dwarf.Offset]string
@@ -150,26 +151,18 @@ type DebugInfo struct {
 	lineFiles        map[dwarf.Offset][]string
 }
 
-func newDebugInfo(modName string, fileName string) (*DebugInfo, error) {
-
-	f, err := elf.Open(fileName)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
+func newDebugInfo(modName string, data *dwarf.Data, offset uint64) (*DebugInfo, error) {
 
 	d := &DebugInfo{
 		moduleName:       modName,
+		offset:           offset,
 		ranges:           make([]rangeOffset, 0, 4096),
 		subPrograms:      make(map[dwarf.Offset][]*godwarf.Tree),
 		abstractPrograms: make(map[dwarf.Offset]string),
 		lineEntries:      make(map[dwarf.Offset][]lineEntry),
 		lineFiles:        make(map[dwarf.Offset][]string),
 	}
-	data, err := f.DWARF()
-	if err != nil {
-		return nil, err
-	}
+
 	rOffset := []rangeOffset{}
 
 	r := data.Reader()
@@ -208,6 +201,8 @@ func newDebugInfo(modName string, fileName string) (*DebugInfo, error) {
 }
 
 func (d *DebugInfo) FrameByAddr(addr uint64, ksym *KernelSymbol) error {
+
+	addr -= d.offset
 
 	idx := sort.Search(len(d.ranges), func(i int) bool {
 		return addr >= d.ranges[i].low
@@ -468,10 +463,22 @@ func (k *KernelSymbolizer) tryLoadDebugInfo(m *moduleAddrSpace) {
 	}
 	m.tryLoad = true
 	if file, err := findPath(m.name); err == nil {
-		d, err := newDebugInfo(m.name, file)
-		if err == nil {
-			m.debugInfo = d
+		if e, err := elf.Open(file); err == nil {
+			baseAddr := uint64(0)
+			for _, s := range e.Sections {
+				if s.Name == ".text" {
+					baseAddr = s.Addr
+					break
+				}
+			}
+			offset := m.start - baseAddr
+			if d, err := e.DWARF(); err == nil {
+				if debug, err := newDebugInfo(m.name, d, offset); err == nil {
+					m.debugInfo = debug
+				}
+			}
 		}
+
 	}
 }
 
@@ -672,11 +679,7 @@ func (m *moduleAddrSpace) FramesByAddr(addr uint64, ksym *KernelSymbol) error {
 		ksym.Offset = addr - sym.addr
 		return nil
 	}
-	realAddr := addr - m.start + 0xffffffff81000000
-	if m.name != "vmlinux" {
-		realAddr = addr - m.start
-	}
-	err := m.debugInfo.FrameByAddr(realAddr, ksym)
+	err := m.debugInfo.FrameByAddr(addr, ksym)
 	if err != nil {
 		return err
 	}
