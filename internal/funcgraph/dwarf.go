@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"golang.org/x/sys/unix"
@@ -75,6 +77,11 @@ func FuncsFromFile(pattern string) map[Symbol]struct{} {
 
 		if cu.Tag == dwarf.TagCompileUnit {
 			name := cu.Val(dwarf.AttrName).(string)
+			if filepath.IsAbs(name) {
+				if idx := strings.Index(name, getOSReleaseSep()); idx != -1 {
+					name = name[idx+len(getOSReleaseSep()):]
+				}
+			}
 			if match, _ := path.Match(pattern, name); match {
 				lr, _ := data.LineReader(cu)
 				currIdx := 1

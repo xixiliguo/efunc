@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unique"
 	"unsafe"
 
@@ -87,6 +88,16 @@ func availKprobeSymbols() map[KprobeSymbol]struct{} {
 	}
 	return syms
 }
+
+var getOSReleaseSep = sync.OnceValue(func() string {
+	var uname unix.Utsname
+	if err := unix.Uname(&uname); err != nil {
+		return ""
+	}
+
+	release := unix.ByteSliceToString(uname.Release[:])
+	return release + "/"
+})
 
 func convertAddr(b []byte) uint64 {
 	v := uint64(0)
@@ -321,8 +332,13 @@ func (d *DebugInfo) parseCompileUnit(offset dwarf.Offset) error {
 			continue
 		}
 		lineFiles[i] = f.Name
-		if p, err := filepath.Rel(compileDir, f.Name); err == nil {
-			lineFiles[i] = p
+		// if p, err := filepath.Rel(compileDir, f.Name); err == nil {
+		// 	lineFiles[i] = p
+		// }
+		if filepath.IsAbs(f.Name) {
+			if idx := strings.Index(f.Name, getOSReleaseSep()); idx != -1 {
+				lineFiles[i] = f.Name[idx+len(getOSReleaseSep()):]
+			}
 		}
 	}
 	d.lineFiles[cu.Offset] = lineFiles
