@@ -113,12 +113,16 @@ var defaultDenyFuncs = []string{
 	"*migrate*",
 	"rcu_read_lock*",
 	"rcu_read_unlock*",
+	"__rcu_read_lock*",
+	"__rcu_read_unlock*",
 	"bpf_lsm_*",
 	"check_cfs_rq_runtime",
 	"find_busiest_group",
 	"find_vma*",
 	"btf_sec_info_cmp",
 	"copy_to_user_nofault",
+	"preempt_count_add",
+	"preempt_count_sub",
 }
 
 type FuncGraph struct {
