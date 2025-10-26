@@ -75,6 +75,7 @@ type Option struct {
 	InheritChild      bool
 	Duration          uint64
 	Depth             uint64
+	StackTrace        bool
 }
 
 type FuncEvent struct {
@@ -165,6 +166,7 @@ type FuncGraph struct {
 	inheritChild        bool
 	duration            uint64
 	depth               uint64
+	stackTrace          bool
 	ksym                *KernelSymbolizer
 }
 
@@ -190,6 +192,7 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 		inheritChild:      opt.InheritChild,
 		duration:          opt.Duration,
 		depth:             opt.Depth,
+		stackTrace:        opt.StackTrace,
 	}
 	for i := 0; i < len(fg.spaceCache); i++ {
 		fg.spaceCache[i] = ' '
@@ -1073,89 +1076,91 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 
 	events := fg.taskToEvents[event.Task]
 	fg.handleFuncEvent(events)
-	for _, addr := range event.Kstack {
-		if addr == 0 {
-			break
-		}
-		var ksym KernelSymbol
-		err := fg.ksym.FramesByAddr(addr, &ksym)
-		if err != nil {
-			fg.buf.WriteString(err.Error())
-			fg.buf.WriteString("\n")
-			continue
-		}
-		for _, f := range ksym.Inlined {
+	if fg.stackTrace {
+		for _, addr := range event.Kstack {
+			if addr == 0 {
+				break
+			}
+			var ksym KernelSymbol
+			err := fg.ksym.FramesByAddr(addr, &ksym)
+			if err != nil {
+				fg.buf.WriteString(err.Error())
+				fg.buf.WriteString("\n")
+				continue
+			}
+			for _, f := range ksym.Inlined {
+				b = t[:0]
+				b = append(b, " (inline) "...)
+				b = append(b, f.Name...)
+				if f.file != "" {
+					if delta := 64 - len(b); delta > 0 {
+						b = append(b, repeatedSpaces[:delta]...)
+					}
+					// fg.buf.WriteString(" at ")
+					// fg.buf.WriteString(f.file)
+					b = append(b, f.file...)
+					b = append(b, ":"...)
+					// fg.buf.WriteString(":")
+					// b = t[:0]
+					b = strconv.AppendUint(b, uint64(f.line), 10)
+					// fg.buf.Write(b)
+				}
+				b = append(b, "\n"...)
+				fg.buf.Write(b)
+			}
+
 			b = t[:0]
-			b = append(b, " (inline) "...)
-			b = append(b, f.Name...)
-			if f.file != "" {
+
+			b = append(b, ksym.Name...)
+			// fg.buf.WriteString(f.funeName)
+			if ksym.Offset != 0 {
+				b = append(b, "+0x"...)
+				// fg.buf.WriteString("+0x")
+				// b = t[:0]
+				b = strconv.AppendUint(b, ksym.Offset, 16)
+				// fg.buf.Write(b)
+			}
+			if ksym.Module != "vmlinux" {
+				b = append(b, " ["...)
+				b = append(b, ksym.Module...)
+				b = append(b, "]"...)
+				// fg.buf.WriteString(" ")
+				// fg.buf.WriteString("[")
+				// fg.buf.WriteString(f.module)
+				// fg.buf.WriteString("]")
+			}
+
+			if ksym.file != "" {
 				if delta := 64 - len(b); delta > 0 {
 					b = append(b, repeatedSpaces[:delta]...)
 				}
 				// fg.buf.WriteString(" at ")
 				// fg.buf.WriteString(f.file)
-				b = append(b, f.file...)
+				b = append(b, ksym.file...)
 				b = append(b, ":"...)
 				// fg.buf.WriteString(":")
 				// b = t[:0]
-				b = strconv.AppendUint(b, uint64(f.line), 10)
+				b = strconv.AppendUint(b, uint64(ksym.line), 10)
 				// fg.buf.Write(b)
 			}
 			b = append(b, "\n"...)
 			fg.buf.Write(b)
-		}
 
-		b = t[:0]
-
-		b = append(b, ksym.Name...)
-		// fg.buf.WriteString(f.funeName)
-		if ksym.Offset != 0 {
-			b = append(b, "+0x"...)
+			// stackLine := fmt.Sprintf()
+			// off := strconv.FormatUint(addr-sym.Addr, 16)
+			// fg.buf.WriteString(sym.Name)
 			// fg.buf.WriteString("+0x")
-			// b = t[:0]
-			b = strconv.AppendUint(b, ksym.Offset, 16)
 			// fg.buf.Write(b)
-		}
-		if ksym.Module != "vmlinux" {
-			b = append(b, " ["...)
-			b = append(b, ksym.Module...)
-			b = append(b, "]"...)
 			// fg.buf.WriteString(" ")
-			// fg.buf.WriteString("[")
-			// fg.buf.WriteString(f.module)
-			// fg.buf.WriteString("]")
+			// fg.buf.WriteString(mod)
+			// fg.buf.WriteString("      ")
+			// fg.buf.WriteString(sym.LOC)
+			// fg.buf.WriteString("\n")
+			// fmt.Fprintf(s, "%s+%#x %s\n", sym.Name, addr-sym.Addr, mod)
+			// buf.WriteString(stackLine)
 		}
-
-		if ksym.file != "" {
-			if delta := 64 - len(b); delta > 0 {
-				b = append(b, repeatedSpaces[:delta]...)
-			}
-			// fg.buf.WriteString(" at ")
-			// fg.buf.WriteString(f.file)
-			b = append(b, ksym.file...)
-			b = append(b, ":"...)
-			// fg.buf.WriteString(":")
-			// b = t[:0]
-			b = strconv.AppendUint(b, uint64(ksym.line), 10)
-			// fg.buf.Write(b)
-		}
-		b = append(b, "\n"...)
-		fg.buf.Write(b)
-
-		// stackLine := fmt.Sprintf()
-		// off := strconv.FormatUint(addr-sym.Addr, 16)
-		// fg.buf.WriteString(sym.Name)
-		// fg.buf.WriteString("+0x")
-		// fg.buf.Write(b)
-		// fg.buf.WriteString(" ")
-		// fg.buf.WriteString(mod)
-		// fg.buf.WriteString("      ")
-		// fg.buf.WriteString(sym.LOC)
-		// fg.buf.WriteString("\n")
-		// fmt.Fprintf(s, "%s+%#x %s\n", sym.Name, addr-sym.Addr, mod)
-		// buf.WriteString(stackLine)
+		fg.buf.WriteString("\n")
 	}
-	fg.buf.WriteString("\n")
 	fg.output.Write(fg.buf.Bytes())
 
 	for _, e := range *events {

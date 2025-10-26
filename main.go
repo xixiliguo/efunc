@@ -285,6 +285,11 @@ ENVIRONMENT:
 							return nil
 						},
 					},
+					&cli.BoolFlag{
+						Name:    "stacktrace",
+						Aliases: []string{"s"},
+						Usage:   "enable stack trace",
+					},
 				},
 				Action: func(ctx *cli.Context) error {
 					exprFmt, _ := regexp.Compile(`.*\(.*\)`)
@@ -346,6 +351,7 @@ ENVIRONMENT:
 						InheritChild:      ctx.Bool("inherit"),
 						Duration:          ctx.Uint64("duration"),
 						Depth:             ctx.Uint64("depth"),
+						StackTrace:        ctx.Bool("stacktrace"),
 					}
 
 					fg, err := funcgraph.NewFuncGraph(&opt)
