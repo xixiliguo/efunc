@@ -129,7 +129,7 @@ var defaultDenyFuncs = []string{
 type FuncGraph struct {
 	funcs               []*FuncInfo
 	links               []link.Link
-	idToFuncs           map[btf.TypeID]*FuncInfo
+	addrToFuncs         map[uint64]*FuncInfo
 	verbose             bool
 	bpfLog              bool
 	dryRun              bool
@@ -181,7 +181,7 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 		maxTraceSize:      opt.MaxTraceSize,
 		maxRingBufferSize: opt.MaxRingSize,
 		mode:              opt.Mode,
-		idToFuncs:         map[btf.TypeID]*FuncInfo{},
+		addrToFuncs:       map[uint64]*FuncInfo{},
 		pids:              map[uint32]bool{},
 		comms:             map[[16]uint8]bool{},
 		parent_ips:        map[uint64]bool{},
@@ -385,7 +385,7 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 			}
 			dup[sym.Module+sym.Name] = struct{}{}
 			fg.funcs = append(fg.funcs, fn)
-			fg.idToFuncs[fn.id] = fn
+			fg.addrToFuncs[fn.Addr] = fn
 			entryCnt++
 			continue
 		}
@@ -396,7 +396,7 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 			}
 			dup[sym.Module+sym.Name] = struct{}{}
 			fg.funcs = append(fg.funcs, fn)
-			fg.idToFuncs[fn.id] = fn
+			fg.addrToFuncs[fn.Addr] = fn
 			entryCnt++
 			continue
 		}
@@ -407,7 +407,7 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 			}
 			dup[sym.Module+sym.Name] = struct{}{}
 			fg.funcs = append(fg.funcs, fn)
-			fg.idToFuncs[fn.id] = fn
+			fg.addrToFuncs[fn.Addr] = fn
 			entryCnt++
 			continue
 		}
@@ -420,7 +420,7 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 			}
 			dup[sym.Module+sym.Name] = struct{}{}
 			fg.funcs = append(fg.funcs, fn)
-			fg.idToFuncs[fn.id] = fn
+			fg.addrToFuncs[fn.Addr] = fn
 			allowedCnt++
 			continue
 		}
@@ -431,7 +431,7 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 			}
 			dup[sym.Module+sym.Name] = struct{}{}
 			fg.funcs = append(fg.funcs, fn)
-			fg.idToFuncs[fn.id] = fn
+			fg.addrToFuncs[fn.Addr] = fn
 			allowedCnt++
 			continue
 		}
@@ -442,7 +442,7 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 			}
 			dup[sym.Module+sym.Name] = struct{}{}
 			fg.funcs = append(fg.funcs, fn)
-			fg.idToFuncs[fn.id] = fn
+			fg.addrToFuncs[fn.Addr] = fn
 			allowedCnt++
 			continue
 		}
@@ -1190,7 +1190,7 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 		}
 		d := time.Duration(e.Duration)
 
-		funcInfo := fg.idToFuncs[btf.TypeID(e.Id)]
+		funcInfo := fg.addrToFuncs[e.Ip]
 		// if e.Id == 0 {
 		// 	if sym, err := SymbolByAddr(e.Ip); err == nil {
 		// 		funcInfo.Symbol = sym
