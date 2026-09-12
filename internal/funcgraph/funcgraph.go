@@ -806,9 +806,18 @@ func (fg *FuncGraph) load() error {
 		},
 	}
 
-	if err := spec.RewriteConstants(consts); err != nil {
-		return fmt.Errorf("spec RewriteConstants: %w", err)
+	for name, v := range consts {
+		if va, ok := spec.Variables[name]; ok {
+			if err := va.Set(v); err != nil {
+				return fmt.Errorf("set variables %s to %+v: %w", name, v, err)
+			}
+		} else {
+			return fmt.Errorf("can not find %s in spec variables", name)
+		}
 	}
+	// if err := spec.RewriteConstants(consts); err != nil {
+	// 	return fmt.Errorf("spec RewriteConstants: %w", err)
+	// }
 
 	if err := spec.LoadAndAssign(&fg.objs, nil); err != nil {
 		var verifyError *ebpf.VerifierError

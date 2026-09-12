@@ -16,5 +16,4 @@ func LoadBTFSpec(mod string) (*btf.Spec, error) {
 
 func FlushBTFSpec() {
 	btfCache = nil
-	btf.FlushKernelSpec()
 }
