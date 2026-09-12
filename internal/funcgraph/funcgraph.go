@@ -321,6 +321,23 @@ func (fg *FuncGraph) matchSymByGlobs(sym KernelSymbol, globs []string, isEntry b
 	return nil, false
 }
 
+func (fg *FuncGraph) matchSymDenyGlob(sym KernelSymbol, denys []string) (string, bool) {
+	for _, name := range denys {
+		mod := ""
+		s := strings.SplitN(name, ":", 2)
+		if len(s) == 2 {
+			mod = s[0]
+			name = s[1]
+		}
+		if match, _ := filepath.Match(name, sym.Name); match {
+			if mod == sym.Module {
+				return name, true
+			}
+		}
+	}
+	return "", false
+}
+
 func (fg *FuncGraph) findBTFInfo(sym KernelSymbol) (btf.TypeID, *btf.Func) {
 
 	spec, err := LoadBTFSpec(sym.Module)
@@ -364,6 +381,8 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 	kiter := &KernelSymbolIterator{
 		K: fg.ksym,
 	}
+
+	denyCounter := map[string]int{}
 	for kiter.Next(&sym) {
 		// fmt.Printf("%+v\n", sym)
 		// for sym := range fg.ksym.AllKernelSymbols() {
@@ -373,7 +392,8 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 		}]; !ok {
 			continue
 		}
-		if _, match := fg.matchSymByGlobs(sym, opt.DenyFuncs, false); match {
+		if name, match := fg.matchSymDenyGlob(sym, opt.DenyFuncs); match {
+			denyCounter[name]++
 			continue
 		}
 
@@ -456,6 +476,11 @@ func (fg *FuncGraph) parseOption(opt *Option) error {
 		return fg.funcs[i].IsEntry
 	})
 
+	if fg.verbose {
+		for name, cnt := range denyCounter {
+			fmt.Printf("deny glob %q match %d functions\n", name, cnt)
+		}
+	}
 	if len(fg.funcs) == 0 || !fg.funcs[0].IsEntry {
 
 		return fmt.Errorf("no entry function")
