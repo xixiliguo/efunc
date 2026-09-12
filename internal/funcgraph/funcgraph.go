@@ -348,14 +348,14 @@ func (fg *FuncGraph) findBTFInfo(sym KernelSymbol) (btf.TypeID, *btf.Func) {
 	info := &btf.Func{}
 	if err := spec.TypeByName(sym.Name, &info); err != nil {
 		if fg.verbose {
-			fmt.Printf("cannot find btf info of function %s: %s\n", sym.Name, err)
+			fmt.Printf("cannot find btf info with func %q: %s\n", sym.Name, err)
 		}
 		return 0, nil
 	}
 	id, err := spec.TypeID(info)
 	if err != nil {
 		if fg.verbose {
-			fmt.Printf("cannot find btf id of function %s: %s\n", sym.Name, err)
+			fmt.Printf("cannot find btf id with func %q: %s\n", sym.Name, err)
 		}
 		return 0, nil
 	}
