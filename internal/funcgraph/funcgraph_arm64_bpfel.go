@@ -100,6 +100,7 @@ type funcgraphFuncEvent struct {
 	Id       uint32
 	HaveData bool
 	_        [3]byte
+	Time     uint64
 	Duration uint64
 	Records  [16]uint64
 	Buf      [0]funcgraphEventData
@@ -148,6 +149,46 @@ const (
 	funcgraphTraceDataFlagsDATA_BUF        funcgraphTraceDataFlags = 16
 )
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	funcgraphMapCallEvents           = "call_events"
+	funcgraphMapCommsFilter          = "comms_filter"
+	funcgraphMapEventStats           = "event_stats"
+	funcgraphMapEvents               = "events"
+	funcgraphMapFuncBasicInfo        = "func_basic_info"
+	funcgraphMapFuncInfo             = "func_info"
+	funcgraphMapParentIpFilter       = "parent_ip_filter"
+	funcgraphMapPidsFilter           = "pids_filter"
+	funcgraphMapReady                = "ready"
+	funcgraphProgFuncentry           = "funcentry"
+	funcgraphProgFuncret             = "funcret"
+	funcgraphProgHandleFork          = "handle_fork"
+	funcgraphProgHandleFree          = "handle_free"
+	funcgraphVarArgAddrUnused        = "arg_addr_unused"
+	funcgraphVarArgTypeUnused        = "arg_type_unused"
+	funcgraphVarCommAllowCnt         = "comm_allow_cnt"
+	funcgraphVarCommDenyCnt          = "comm_deny_cnt"
+	funcgraphVarDurationMs           = "duration_ms"
+	funcgraphVarEntryUnused          = "entry_unused"
+	funcgraphVarEventDataUnused      = "event_data_unused"
+	funcgraphVarHasBpfGetFuncIp      = "has_bpf_get_func_ip"
+	funcgraphVarKretOffset           = "kret_offset"
+	funcgraphVarMaxDepth             = "max_depth"
+	funcgraphVarMaxTraceBuf          = "max_trace_buf"
+	funcgraphVarMaxTraceData         = "max_trace_data"
+	funcgraphVarParentIpAllowCnt     = "parent_ip_allow_cnt"
+	funcgraphVarParentIpDenyCnt      = "parent_ip_deny_cnt"
+	funcgraphVarPidAllowCnt          = "pid_allow_cnt"
+	funcgraphVarPidDenyCnt           = "pid_deny_cnt"
+	funcgraphVarStartUnused          = "start_unused"
+	funcgraphVarTraceConstantUnused  = "trace_constant_unused"
+	funcgraphVarTraceDataFlagsUnused = "trace_data_flags_unused"
+	funcgraphVarTraceUnused          = "trace_unused"
+	funcgraphVarVerbose              = "verbose"
+)
+
 // loadFuncgraph returns the embedded CollectionSpec for funcgraph.
 func loadFuncgraph() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_FuncgraphBytes)
@@ -168,7 +209,7 @@ func loadFuncgraph() (*ebpf.CollectionSpec, error) {
 //	*funcgraphMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadFuncgraphObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadFuncgraphObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadFuncgraph()
 	if err != nil {
 		return err

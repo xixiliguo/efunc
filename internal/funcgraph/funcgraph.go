@@ -76,6 +76,7 @@ type Option struct {
 	Duration          uint64
 	Depth             uint64
 	StackTrace        bool
+	EventStartTime    bool
 }
 
 type FuncEvent struct {
@@ -168,6 +169,7 @@ type FuncGraph struct {
 	depth               uint64
 	stackTrace          bool
 	ksym                *KernelSymbolizer
+	eventStartTime      bool
 }
 
 func NewFuncGraph(opt *Option) (*FuncGraph, error) {
@@ -193,6 +195,7 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 		duration:          opt.Duration,
 		depth:             opt.Depth,
 		stackTrace:        opt.StackTrace,
+		eventStartTime:    opt.EventStartTime,
 	}
 	for i := 0; i < len(fg.spaceCache); i++ {
 		fg.spaceCache[i] = ' '
@@ -216,6 +219,11 @@ func NewFuncGraph(opt *Option) (*FuncGraph, error) {
 	if opt, err := NewDumpOption(); err != nil {
 		return nil, err
 	} else {
+		if fg.eventStartTime {
+			opt.SetPrefixLen(36)
+		} else {
+			opt.SetPrefixLen(20)
+		}
 		fg.opt = opt
 	}
 
@@ -1006,8 +1014,8 @@ func (fg *FuncGraph) Run() error {
 				SeqId: entryEvent.SeqId,
 				Ip:    entryEvent.Ip,
 				Id:    entryEvent.Id,
-				// Time:  entryEvent.Time,
-				Para: entryEvent.Records,
+				Time:  entryEvent.Time,
+				Para:  entryEvent.Records,
 			}
 			if entryEvent.HaveData {
 				eventData := (*funcgraphEventData)(unsafe.Pointer(&entryEvent.Buf))
@@ -1036,14 +1044,14 @@ func (fg *FuncGraph) Run() error {
 			// fmt.Printf("receive funcevent %+v\n", funcEvent)
 
 			e := FuncEvent{
-				Type:  retEvent.Type,
-				Task:  retEvent.Task,
-				CpuId: retEvent.CpuId,
-				Depth: retEvent.Depth,
-				SeqId: retEvent.SeqId,
-				Ip:    retEvent.Ip,
-				Id:    retEvent.Id,
-				// Time:     retEvent.Time,
+				Type:     retEvent.Type,
+				Task:     retEvent.Task,
+				CpuId:    retEvent.CpuId,
+				Depth:    retEvent.Depth,
+				SeqId:    retEvent.SeqId,
+				Ip:       retEvent.Ip,
+				Id:       retEvent.Id,
+				Time:     retEvent.Time,
 				Duration: retEvent.Duration,
 				Ret:      retEvent.Records,
 			}
@@ -1209,10 +1217,17 @@ func (fg *FuncGraph) handleCallEvent(event *funcgraphCallEvent) {
 }
 
 func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
-	fg.buf.WriteString(" CPU   DURATION | FUNCTION GRAPH\n")
-	fg.buf.WriteString(" ---   -------- | --------------\n")
+	if fg.eventStartTime {
+		fg.buf.WriteString("      START      CPU   DURATION | FUNCTION GRAPH\n")
+		fg.buf.WriteString(" --------------- ---   -------- | --------------\n")
+	} else {
+		fg.buf.WriteString(" CPU   DURATION | FUNCTION GRAPH\n")
+		fg.buf.WriteString(" ---   -------- | --------------\n")
+	}
 	events := *es
 	prevSeqId := uint64(0)
+
+	var startBuf [32]byte
 
 	for i := 0; i < len(events); i++ {
 		e := &events[i]
@@ -1236,6 +1251,12 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 			if i+1 < len(events) && events[i+1].Type == uint8(RetEvent) &&
 				events[i+1].Ip == e.Ip && events[i+1].CpuId == e.CpuId {
 				ret := &events[i+1]
+				if fg.eventStartTime {
+					start := startBuf[:0]
+					start = time.Unix(int64(fg.bootTime), int64(e.Time)).AppendFormat(start, "15:04:05.000000")
+					fg.buf.Write(fg.spaceCache[:1])
+					fg.buf.Write(start)
+				}
 				d := time.Duration(ret.Duration)
 				id := strconv.FormatInt(int64(e.CpuId), 10)
 				if gap := 3 - len(id); gap > 0 {
@@ -1275,7 +1296,12 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 				i++
 				prevSeqId = ret.SeqId
 			} else {
-
+				if fg.eventStartTime {
+					start := startBuf[:0]
+					start = time.Unix(int64(fg.bootTime), int64(e.Time)).AppendFormat(start, "15:04:05.000000")
+					fg.buf.Write(fg.spaceCache[:1])
+					fg.buf.Write(start)
+				}
 				id := strconv.FormatInt(int64(e.CpuId), 10)
 				if gap := 3 - len(id); gap > 0 {
 					fg.buf.Write(fg.spaceCache[:gap])
@@ -1298,6 +1324,12 @@ func (fg *FuncGraph) handleFuncEvent(es *FuncEvents) {
 				funcInfo.ShowTrace(e, fg.opt, fg.buf)
 			}
 		} else {
+			if fg.eventStartTime {
+				start := startBuf[:0]
+				start = time.Unix(int64(fg.bootTime), int64(e.Time)).AppendFormat(start, "15:04:05.000000")
+				fg.buf.Write(fg.spaceCache[:1])
+				fg.buf.Write(start)
+			}
 			id := strconv.FormatInt(int64(e.CpuId), 10)
 			if gap := 3 - len(id); gap > 0 {
 				fg.buf.Write(fg.spaceCache[:gap])

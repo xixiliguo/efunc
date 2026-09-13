@@ -98,7 +98,7 @@ func (f *FuncInfo) ShowTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 	for idx, t := range f.trace {
 		off := e.DataOff[idx]
 		if off < 0 {
-			msg := fmt.Sprintf("%*s%s = Error(%d)", int(10+e.Depth)*2, " ", t.name, off)
+			msg := fmt.Sprintf("%*s%s = Error(%d)", opt.prefix+int(e.Depth)*2, " ", t.name, off)
 			dst.WriteString(msg)
 			dst.WriteByte('\n')
 			break
@@ -108,7 +108,7 @@ func (f *FuncInfo) ShowTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer) {
 		if idx+1 < len(f.trace) && e.DataOff[idx+1] >= 0 {
 			end = e.DataOff[idx+1]
 		}
-		opt.Reset((*e.Data)[off:end], t.isStr, t.isBuf, t.size, int(10+e.Depth), false)
+		opt.Reset((*e.Data)[off:end], t.isStr, t.isBuf, t.size, int(e.Depth), false)
 		o, s := t.bitOff, t.bitSize
 		opt.dumpDataByBTF(t.name, t.typ, 0, int(o), int(s))
 		dst.WriteString(opt.String())
@@ -120,7 +120,7 @@ func (f *FuncInfo) ShowRetTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer
 	for idx, t := range f.retTrace {
 		off := e.DataOff[idx]
 		if off < 0 {
-			msg := fmt.Sprintf("%*s%s = Error(%d)", int(10+e.Depth)*2, " ", t.name, off)
+			msg := fmt.Sprintf("%*s%s = Error(%d)", opt.prefix+int(e.Depth)*2, " ", t.name, off)
 			dst.WriteString(msg)
 			dst.WriteByte('\n')
 			break
@@ -129,7 +129,7 @@ func (f *FuncInfo) ShowRetTrace(e *FuncEvent, opt *dumpOption, dst *bytes.Buffer
 		if idx+1 < len(f.trace) && e.DataOff[idx+1] >= 0 {
 			end = e.DataOff[idx+1]
 		}
-		opt.Reset((*e.Data)[off:end], t.isStr, t.isBuf, t.size, int(10+e.Depth), false)
+		opt.Reset((*e.Data)[off:end], t.isStr, t.isBuf, t.size, int(e.Depth), false)
 		o, s := t.bitOff, t.bitSize
 		opt.dumpDataByBTF(t.name, t.typ, 0, int(o), int(s))
 		dst.WriteString(opt.String())

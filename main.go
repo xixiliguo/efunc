@@ -290,6 +290,10 @@ ENVIRONMENT:
 						Aliases: []string{"s"},
 						Usage:   "enable stack trace",
 					},
+					&cli.BoolFlag{
+						Name:  "event-start-time",
+						Usage: "enable show each event start time",
+					},
 				},
 				Action: func(ctx *cli.Context) error {
 					exprFmt, _ := regexp.Compile(`.*\(.*\)`)
@@ -352,6 +356,7 @@ ENVIRONMENT:
 						Duration:          ctx.Uint64("duration"),
 						Depth:             ctx.Uint64("depth"),
 						StackTrace:        ctx.Bool("stacktrace"),
+						EventStartTime:    ctx.Bool("event-start-time"),
 					}
 
 					fg, err := funcgraph.NewFuncGraph(&opt)

@@ -159,7 +159,7 @@ struct func_event {
     u64 ip;
     u32 id;
     bool have_data;
-    // u64 time;
+    u64 time;
     u64 duration;
     u64 records[PARA_LEN];
     struct event_data buf[0];
@@ -572,7 +572,7 @@ static __always_inline void extract_data(struct pt_regs *ctx, bool is_ret, struc
                 err  = bpf_probe_read_user(dst, sz, (void *)data_ptr);
             }
         }
-
+        barrier_var(sz);
         if (err < 0) {
             buf->data_off[i] = err;
             return;
@@ -772,6 +772,7 @@ static __always_inline bool trace_data_allowed(struct event_data *buf, struct fu
         if (buf->data_off[index] >= max_trace_buf) {
             break;
         }
+        barrier_var(buf->data_off[index]);
         void *dst = buf->data + buf->data_off[index];
         cmp_cnt++;
         cnt_allowed += trace_allowed(t, dst);
@@ -920,7 +921,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
             entry_info->seq_id = e->next_seq_id;
             entry_info->ip = ip;
             entry_info->id = fn_basic->id;
-            // entry_info->time = bpf_ktime_get_ns();
+            entry_info->time = bpf_ktime_get_ns();
             extract_func_paras(entry_info, ctx);
             entry_info->have_data = false;
             if (verbose) {
@@ -943,7 +944,7 @@ static __always_inline int handle_entry(struct pt_regs *ctx) {
             entry_info->seq_id = e->next_seq_id;
             entry_info->ip = ip;
             entry_info->id = fn->id;
-            // entry_info->time = bpf_ktime_get_ns();
+            entry_info->time = bpf_ktime_get_ns();
             extract_func_paras(entry_info, ctx);
             entry_info->have_data = true;
             extract_data(ctx, false, fn, entry_info->buf);
@@ -1053,7 +1054,7 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
             ret_info->seq_id = e->next_seq_id;
             ret_info->ip = ip;
             ret_info->id = fn_basic->id;
-            // ret_info->time = bpf_ktime_get_ns();
+            ret_info->time = bpf_ktime_get_ns();
             ret_info->duration = bpf_ktime_get_ns() - e->durations[d];
             extract_func_ret(ret_info,ctx);
             ret_info->have_data = false;
@@ -1075,7 +1076,7 @@ static __always_inline int handle_ret(struct pt_regs *ctx) {
             ret_info->seq_id = e->next_seq_id;
             ret_info->ip = ip;
             ret_info->id = fn->id;
-            // ret_info->time = bpf_ktime_get_ns();
+            ret_info->time = bpf_ktime_get_ns();
             ret_info->duration = bpf_ktime_get_ns() - e->durations[d];
             extract_func_ret(ret_info,ctx);
             ret_info->have_data = true;

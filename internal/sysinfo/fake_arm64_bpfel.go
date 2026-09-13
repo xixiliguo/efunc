@@ -12,6 +12,16 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+// Names of all BPF objects in the ELF.
+//
+// Used for safe lookups in a Collection or CollectionSpec.
+const (
+	fakeMapRetOffset  = "ret_offset"
+	fakeProgFuncentry = "funcentry"
+	fakeProgFuncret   = "funcret"
+	fakeVarEntryIp    = "entry_ip"
+)
+
 // loadFake returns the embedded CollectionSpec for fake.
 func loadFake() (*ebpf.CollectionSpec, error) {
 	reader := bytes.NewReader(_FakeBytes)
@@ -32,7 +42,7 @@ func loadFake() (*ebpf.CollectionSpec, error) {
 //	*fakeMaps
 //
 // See ebpf.CollectionSpec.LoadAndAssign documentation for details.
-func loadFakeObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
+func loadFakeObjects(obj any, opts *ebpf.CollectionOptions) error {
 	spec, err := loadFake()
 	if err != nil {
 		return err

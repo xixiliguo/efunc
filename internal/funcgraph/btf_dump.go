@@ -20,6 +20,7 @@ type dumpOption struct {
 	isStr          bool
 	isBuf          bool
 	bufSize        int
+	prefix         int
 	level          int
 	showZero       bool
 	buf            *bytes.Buffer
@@ -57,6 +58,10 @@ func NewDumpOption() (*dumpOption, error) {
 	}
 
 	return &d, nil
+}
+
+func (opt *dumpOption) SetPrefixLen(v int) {
+	opt.prefix = v
 }
 
 func (opt *dumpOption) Reset(data []byte, isStr bool, isBuf bool, BufSize int, level int, compact bool) {
@@ -339,7 +344,7 @@ func (opt *dumpOption) dumpDataByBTF(name string, typ btf.Type, offset, bitOff, 
 	level := opt.level
 	data := opt.data
 
-	space := toString(opt.spaceCache[:2*level])
+	space := toString(opt.spaceCache[:opt.prefix+2*level])
 	if opt.compact {
 		space = ""
 	}
